@@ -163,23 +163,10 @@ void WebsocketConn::onRead(const TcpConnectionPtr& conn, std::string& buf) {
 
         // 处理业务逻辑
         if (opcode == 0x01) { // 文本帧
-            // Json::Value root;
-            // Json::Reader reader;
 
-            // if(reader.parse(payload_data, root) && !root["type"].isNull()) {
-            //     std::string type = root["type"].asString();
-            //     if(type == "ClientMessage") {
-            //         // handleClientMessage(redis, root);
+            std::string message = this->grpcClient_->rpcCilentMessage(payload_data, this->userid_, this->username_);
 
-            //     } else if(type == "RequestRoomHistory") {
-            //         // handleRequestRoomHistory(redis, root);
-
-            //     } else if(type == "clientCreateRoom") {
-            //         // handleClientCreateRoom(pool, root);
-            //     }
-            // }
-
-            this->grpcClient_->rpcCilentMessage(payload_data, this->userid_, this->username_);
+            if(!message.empty()) this->send(message);
 
         } else if (opcode == 0x08) {
             // 处理 Close 帧

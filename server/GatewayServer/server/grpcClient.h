@@ -43,8 +43,8 @@ public:
     void rpcLogin(const HttpRequest&, HttpResponse&, int& errcode, std::string& errmsg);
     void rpcRegister(const HttpRequest&, HttpResponse&, int& errcode, std::string& errmsg);
     void rpcVerify(const std::string&, int32_t&, std::string& username, int&);
-    std::string rpcPullMessage(const int32_t& userid, const std::string& username, const int messagecount);
-    void rpcCilentMessage(const std::string& message, int32_t& userid, const std::string& username);
+    std::string rpcinitialPullMessage(const int32_t& userid, const std::string& username, const int messagecount);
+    std::string rpcCilentMessage(const std::string& message, int32_t& userid, const std::string& username);
     void rpcclearCursors(const int32_t& userid);
     std::vector<std::string> rpcGetUserRoomList(const int32_t& userid);
 

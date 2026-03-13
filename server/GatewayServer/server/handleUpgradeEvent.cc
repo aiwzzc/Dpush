@@ -89,7 +89,7 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
             GatewayPubSubManager::WebsockConnRoomhash[roomid].insert(wsContextPtr);
         }
 
-        std::string helloMessage = client->rpcPullMessage(userid, username, 10);
+        std::string helloMessage = client->rpcinitialPullMessage(userid, username, 10);
 
         wsContextPtr->send(helloMessage);
 

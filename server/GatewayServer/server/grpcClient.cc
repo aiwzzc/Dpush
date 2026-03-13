@@ -136,7 +136,7 @@ void grpcClient::rpcVerify(const std::string& token, int32_t& userid, std::strin
     }
 }
 
-std::string grpcClient::rpcPullMessage(const int32_t& userid, const std::string& username, const int messagecount) {
+std::string grpcClient::rpcinitialPullMessage(const int32_t& userid, const std::string& username, const int messagecount) {
     ClientContext ctx;
     logic::pullMessageRequest request;
     logic::pullMessageResponse response;
@@ -145,7 +145,7 @@ std::string grpcClient::rpcPullMessage(const int32_t& userid, const std::string&
     request.set_username(username);
     request.set_messagecount(messagecount);
 
-    Status s = this->Logicstub->pullMessage(&ctx, request, &response);
+    Status s = this->Logicstub->initialPullMessage(&ctx, request, &response);
     std::string helloMessage;
 
     if(s.ok()) helloMessage = response.message();
@@ -153,7 +153,7 @@ std::string grpcClient::rpcPullMessage(const int32_t& userid, const std::string&
     return helloMessage;
 }
 
-void grpcClient::rpcCilentMessage(const std::string& message, int32_t& userid, const std::string& username) {
+std::string grpcClient::rpcCilentMessage(const std::string& message, int32_t& userid, const std::string& username) {
     ClientContext ctx;
     logic::clientMessageRequest request;
     logic::clientMessageResponse response;
@@ -164,9 +164,9 @@ void grpcClient::rpcCilentMessage(const std::string& message, int32_t& userid, c
 
     Status s = this->Logicstub->clientMessage(&ctx, request, &response);
 
-    if(s.ok()) return;
+    if(s.ok() && !response.message().empty()) return response.message();
 
-    return;
+    return "";
 }
 
 void grpcClient::rpcclearCursors(const int32_t& userid) {
@@ -196,7 +196,11 @@ std::vector<std::string> grpcClient::rpcGetUserRoomList(const int32_t& userid) {
     if(s.ok()) {
         for(const auto& roominfo : response.roomlist()) {
             std::string roomid = roominfo.room_id();
-            roomlist.emplace_back(roomid);
+            std::size_t colon_pos = roomid.find(":");
+            if(colon_pos == std::string::npos) return {};
+
+            std::string real_roomid = roomid.substr(0, colon_pos);
+            roomlist.emplace_back(real_roomid);
         }
     }
 

@@ -20,6 +20,7 @@ message clientMessageRequest {
 
 message clientMessageResponse {
     bool ok = 1;
+    bytes message = 2;
 }
 
 message clearCursorsRequest {
@@ -31,7 +32,7 @@ message clearCursorsResponse {
 }
 
 service LogicServer {
-    rpc pullMessage (pullMessageRequest) returns (pullMessageResponse);
+    rpc initialPullMessage (pullMessageRequest) returns (pullMessageResponse);
     rpc clientMessage (clientMessageRequest) returns (clientMessageResponse);
     rpc clearCursors (clearCursorsRequest) returns (clearCursorsResponse);
 }

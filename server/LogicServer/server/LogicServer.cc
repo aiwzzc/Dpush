@@ -237,31 +237,66 @@ struct clearCursorsAwaiter {
     bool await_resume() { return true; }
 };
 
-QueryAwaiter async_query_for_coro(MySQLConnPool* pool, const std::string& sql, SQLOperation::SQLType type) {
-    return QueryAwaiter{pool, sql, type, {}};
-}
+struct GetRoomListAwaiter {
 
-UpdateAwaiter async_update_for_coro(MySQLConnPool* pool, const std::string& sql, SQLOperation::SQLType type) {
-    return UpdateAwaiter{pool, sql, type, ""};
-}
+    int32_t userid_;
+    std::unordered_map<std::string, std::string>* roomlist_;
+    threadpool* threadpool_;
 
-RedisXaddAwaiter async_redisXadd_for_coro(sw::redis::Redis* redis, std::vector<Message>& messages, 
-const std::string& roomid, threadpool* threadpool){
-    return RedisXaddAwaiter{redis, messages, roomid, threadpool};
-}
+    bool await_ready() const noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> handle) {
+        this->threadpool_->submit([this, handle] () {
+            auto channel = grpc::CreateChannel("127.0.0.1:5007", grpc::InsecureChannelCredentials());
+            std::unique_ptr<room::RoomServer::Stub> stub = room::RoomServer::NewStub(channel);
 
-ParseClientJsonAwaiter async_parseclientjson_for_coro(Json::Value* root, std::vector<Message>* messages, 
-int32_t& userid, const std::string& username, threadpool* threadpool) {
-    return ParseClientJsonAwaiter{root, messages, userid, username, threadpool, ""};
-}
+            grpc::ClientContext ctx;
+            room::GetUserRoomListResponse res;
+            room::GetUserRoomListRequest req;
+            req.set_userid(this->userid_);
 
-fillServerJsonAwaiter async_fillserverjson_for_coro(threadpool* threadpool, std::vector<Message>* messages, std::string& roomid) {
-    return fillServerJsonAwaiter{threadpool, messages, roomid, ""};
-}
+            Status s = stub->GetUserRoomList(&ctx, req, &res);
 
-clearCursorsAwaiter async_clearCursors_for_coro(sw::redis::Redis* redis, threadpool* threadpool, int32_t& userid) {
-    return clearCursorsAwaiter{redis, threadpool, userid};
-}
+            if(s.ok()) {
+                for(const auto& roominfo : res.roomlist()) {
+                    std::string roomid = roominfo.room_id();
+                    std::size_t colon_pos = roomid.find(":");
+                    if(colon_pos == std::string::npos) continue;
+
+                    std::string real_roomid = roomid.substr(0, colon_pos);
+                    std::string real_roomname = roomid.substr(colon_pos + 1);
+
+                    this->roomlist_->insert({real_roomid, real_roomname});
+                }
+            }
+
+            handle.resume();
+        });
+    }
+
+    bool await_resume() { return true; }
+};
+
+struct GetUserCursors {
+
+    threadpool* threadpool_;
+    sw::redis::Redis* redis_;
+    std::string userid_;
+    std::unordered_map<std::string, std::string> cursors_;
+
+    bool await_ready() const noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> handle) {
+        this->threadpool_->submit([this, handle] () {
+            std::unordered_map<std::string, std::string> cursors;
+            this->redis_->hgetall(this->userid_, std::inserter(cursors, cursors.begin()));
+
+            this->cursors_ = std::move(cursors);
+            handle.resume();
+        });
+    }
+
+    std::unordered_map<std::string, std::string> await_resume() { return this->cursors_; }
+
+};
 
 int fillMessageBatch(const std::pair<std::string, std::unordered_map<std::string, std::string>>& msgStream, MessageBatch& msgs) {
     const std::string& msg_id = msgStream.first;
@@ -307,6 +342,174 @@ int fillMessageBatch(const std::pair<std::string, std::unordered_map<std::string
     return 0;
 }
 
+struct GerHistoryMessageAwaiter {
+
+    using streamMsg = std::pair<std::string, std::unordered_map<std::string, std::string>>;
+
+    threadpool* threadpool_;
+    sw::redis::Redis* redis_;
+    std::string userid_;
+    std::string roomid_;
+    std::unordered_map<std::string, std::string> cursors_;
+    int messagecount_;
+    // std::vector<streamMsg> messages_;
+    MessageBatch messages_;
+
+    bool await_ready() const noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> handle) {
+        this->threadpool_->submit([this, handle] () {
+            std::string last_message_id = this->cursors_.empty() ? "" : this->cursors_[this->roomid_];
+            int get_count = messagecount_;
+            
+            std::string stream_ref = last_message_id.empty() ? "+" : "(" + last_message_id;
+    
+            std::vector<streamMsg> messages;
+
+            this->redis_->xrevrange(this->roomid_, stream_ref, "-", get_count, std::back_inserter(messages));
+            if(!messages.empty()) this->redis_->hset(this->userid_, this->roomid_, messages.back().first);
+    
+            for(const auto& msg : messages) {
+                int ret = fillMessageBatch(msg, this->messages_);
+                if(ret < 0) {
+                    handle.resume();
+                    return;
+                }
+            }
+
+            if(messages.size() < messagecount_) this->messages_.has_more = false;
+            else this->messages_.has_more = true;
+
+            handle.resume();
+        });
+    }
+
+    MessageBatch await_resume() { return this->messages_; }
+
+};
+
+struct MakeRequestMessageAwaiter {
+
+    threadpool* threadpool_;
+    Json::Value* root_;
+    std::string roomname_;
+    MessageBatch msgs_;
+    std::string websocketStr_;
+
+    bool await_ready() const noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> handle) {
+        this->threadpool_->submit([this, handle] () {
+            Json::Value root = *this->root_;
+            if(root["payload"].isNull()) {
+                // 日志
+                handle.resume();
+                return;
+            }
+            Json::Value payload = root["payload"];
+
+            if(payload["roomId"].isNull()) {
+                // 日志
+                handle.resume();
+                return;
+            }
+            std::string roomId = payload["roomId"].asString();
+
+            if(payload["firstMessageId"].isNull()) {
+                // 日志
+                handle.resume();
+                return;
+            }
+            std::string firstMessageId = payload["firstMessageId"].asString();
+
+            if(payload["count"].isNull()) {
+                // 日志
+                handle.resume();
+                return;
+            }
+            int count = payload["count"].asInt();
+
+            root = Json::Value{};
+            payload = Json::Value{};
+            Json::Value messages;
+            root["type"] = "RequestMessage";
+            payload["roomId"] = roomId;
+            payload["roomname"] = roomname_;
+            payload["hasMoreMessages"] = msgs_.has_more;
+
+            for(const auto& message : msgs_.messages) {
+                Json::Value user;
+                Json::Value Msg;
+
+                Msg["id"] = message.id;
+                Msg["content"] = message.content;
+                user["userid"] = message.user_id;
+                user["username"] = message.username;
+                Msg["user"] = user;
+                Msg["timestamp"] = message.timestamp;
+                messages.append(Msg);
+            }
+
+            if(!messages.empty()) payload["message"] = messages;
+            else payload["message"] = Json::arrayValue;
+
+            root["payload"] = payload;
+            Json::FastWriter writer;
+            std::string resJson = writer.write(root);
+
+            this->websocketStr_ = buildWebSocketFrame(resJson);
+
+            handle.resume();
+        });
+    }
+
+    std::string await_resume() { return this->websocketStr_; }
+
+};
+
+QueryAwaiter async_query_for_coro(MySQLConnPool* pool, const std::string& sql, SQLOperation::SQLType type) {
+    return QueryAwaiter{pool, sql, type, {}};
+}
+
+UpdateAwaiter async_update_for_coro(MySQLConnPool* pool, const std::string& sql, SQLOperation::SQLType type) {
+    return UpdateAwaiter{pool, sql, type, ""};
+}
+
+RedisXaddAwaiter async_redisXadd_for_coro(sw::redis::Redis* redis, std::vector<Message>& messages, 
+const std::string& roomid, threadpool* threadpool){
+    return RedisXaddAwaiter{redis, messages, roomid, threadpool};
+}
+
+ParseClientJsonAwaiter async_parseclientjson_for_coro(Json::Value* root, std::vector<Message>* messages, 
+int32_t& userid, const std::string& username, threadpool* threadpool) {
+    return ParseClientJsonAwaiter{root, messages, userid, username, threadpool, ""};
+}
+
+fillServerJsonAwaiter async_fillserverjson_for_coro(threadpool* threadpool, std::vector<Message>* messages, std::string& roomid) {
+    return fillServerJsonAwaiter{threadpool, messages, roomid, ""};
+}
+
+clearCursorsAwaiter async_clearCursors_for_coro(sw::redis::Redis* redis, threadpool* threadpool, int32_t& userid) {
+    return clearCursorsAwaiter{redis, threadpool, userid};
+}
+
+GetRoomListAwaiter async_getRoomList_for_coro(const int32_t& userid, std::unordered_map<std::string, std::string>* roomlist, 
+threadpool* threadpool) {
+    return GetRoomListAwaiter{userid, roomlist, threadpool};
+}
+
+GetUserCursors async_GetUserCursors_for_coro(threadpool* threadpool, sw::redis::Redis* redis, const std::string& userid) {
+    return GetUserCursors(threadpool, redis, userid, {});
+}
+
+GerHistoryMessageAwaiter async_GerHistoryMessage_for_coro(threadpool* threadpool, sw::redis::Redis* redis, const std::string& userid, 
+const std::string& roomid, std::unordered_map<std::string, std::string>& cursors, int messagecount) {
+    return GerHistoryMessageAwaiter{threadpool, redis, userid, roomid, cursors, messagecount, {}};
+}
+
+MakeRequestMessageAwaiter async_MakeRequestMessage_for_coro(threadpool* threadpool, Json::Value* root, const std::string& roomname,
+const MessageBatch& messages) {
+    return MakeRequestMessageAwaiter{threadpool, root, roomname, messages, ""};
+}
+
 void fillRoomJson(const MessageBatch& message_batch, Json::Value& room, const std::string& roomid, const std::string& roomname) {
     room["id"] = roomid;
     room["name"] = roomname;
@@ -331,8 +534,8 @@ void fillRoomJson(const MessageBatch& message_batch, Json::Value& room, const st
         room["messages"] = Json::arrayValue;  //不能为NULL，否则前端报异常
 }
 
-DetachedTask LogicServer::DopullMessage(grpc::ServerUnaryReactor* reatcor, std::vector<std::string> roomlist, 
-    const logic::pullMessageRequest* request, logic::pullMessageResponse* response) {
+DetachedTask LogicServer::DoinitialPullMessage(grpc::ServerUnaryReactor* reatcor, const logic::pullMessageRequest* request, 
+    logic::pullMessageResponse* response) {
 
     std::string userid = std::to_string(request->userid());
 
@@ -349,59 +552,21 @@ DetachedTask LogicServer::DopullMessage(grpc::ServerUnaryReactor* reatcor, std::
     Json::Value rooms;
     int it_index = 0;
 
+    std::unordered_map<std::string, std::string> roomlist;
+
+    bool ok = co_await async_getRoomList_for_coro(request->userid(), &roomlist, this->thread_pool_);
+
     if (roomlist.empty()) {
-        // 如果没有房间，直接返回空结果，没必要去查数据库
-        // return co_await ... 或直接 return 空数据;
         reatcor->Finish(grpc::Status::OK);
         co_return;
     }
 
-    // 需要改为redis缓存策略
-    std::ostringstream ids;
-    for (size_t i = 0; i < roomlist.size(); ++i) {
-        if (i > 0) {
-            ids << ","; // 只要不是第一个元素，前面就加逗号
-        }
-        ids << "'" << roomlist[i] << "'";
-    }
+    std::unordered_map<std::string, std::string> cursors = co_await async_GetUserCursors_for_coro(this->thread_pool_,
+    this->redis_pool_, userid);
 
-    std::stringstream ss;
-    ss << "SELECT room_id, room_name FROM room_info WHERE room_id IN (" + ids.str() + ")";
-
-    SQLResult res = co_await async_query_for_coro(this->mysql_pool_, ss.str(), SQLOperation::SQLType::QUERY);
-
-    std::unordered_map<std::string, std::string> roominfo;
-    for(const auto& rows : res) {
-        if(!rows.empty()) roominfo[rows[0]] = rows[1];
-    }
-
-    std::unordered_map<std::string, std::string> cursors;
-    this->redis_pool_->hgetall(userid, std::inserter(cursors, cursors.begin()));
-
-    for(auto it = roominfo.begin(); it != roominfo.end(); ++it) {
-        std::string last_message_id = cursors.empty() ? "" : cursors[it->first];
-        int get_count = request->messagecount();
-        
-        std::string stream_ref = last_message_id.empty() ? "+" : "(" + last_message_id;
-    
-        using streamMsg = std::pair<std::string, std::unordered_map<std::string, std::string>>;
-        std::vector<streamMsg> messages;
-
-        this->redis_pool_->xrevrange(it->first, stream_ref, "-", get_count, std::back_inserter(messages));
-        if(!messages.empty()) this->redis_pool_->hset(userid, it->first, messages.back().first);
-
-        MessageBatch msgs;
-
-        for(const auto& msg : messages) {
-            int ret = fillMessageBatch(msg, msgs);
-            if(ret < 0) {
-                reatcor->Finish(grpc::Status::OK);
-                co_return;
-            }
-        }
-
-        if(messages.size() < request->messagecount()) msgs.has_more = false;
-        else msgs.has_more = true;
+    for(auto it = roomlist.begin(); it != roomlist.end(); ++it) {
+        MessageBatch msgs = co_await async_GerHistoryMessage_for_coro(this->thread_pool_, this->redis_pool_,
+        userid, it->first, cursors, request->messagecount());
 
         Json::Value room;
         fillRoomJson(msgs, room, it->first, it->second);
@@ -418,29 +583,12 @@ DetachedTask LogicServer::DopullMessage(grpc::ServerUnaryReactor* reatcor, std::
     reatcor->Finish(grpc::Status::OK);
 }
 
-grpc::ServerUnaryReactor* LogicServer::pullMessage(grpc::CallbackServerContext* context, const logic::pullMessageRequest* request, 
+grpc::ServerUnaryReactor* LogicServer::initialPullMessage(grpc::CallbackServerContext* context, const logic::pullMessageRequest* request, 
     logic::pullMessageResponse* response) {
 
     grpc::ServerUnaryReactor* reactor = context->DefaultReactor();
 
-    auto channel = grpc::CreateChannel("127.0.0.1:5007", grpc::InsecureChannelCredentials());
-    std::unique_ptr<room::RoomServer::Stub> stub = room::RoomServer::NewStub(channel);
-
-    grpc::ClientContext ctx;
-    room::GetUserRoomListResponse res;
-    room::GetUserRoomListRequest req;
-    req.set_userid(request->userid());
-
-    Status s = stub->GetUserRoomList(&ctx, req, &res);
-    if(s.ok()) {
-        std::vector<std::string> roomlist;
-        for(const auto& roominfo : res.roomlist()) {
-            std::string roomid = roominfo.room_id();
-            roomlist.emplace_back(roomid);
-        }
-
-        DopullMessage(reactor, roomlist, request, response);
-    }
+    DoinitialPullMessage(reactor, request, response);
 
     return reactor;
 }
@@ -482,6 +630,35 @@ DetachedTask LogicServer::DoclientMessage(grpc::ServerUnaryReactor* reactor, con
         std::string payload_to_publish = std::to_string(userid) + ":" + resMessage;
 
         this->redis_pool_->publish("room:" + roomid, payload_to_publish);
+
+        response->set_ok(true);
+        response->set_message("");
+
+        reactor->Finish(grpc::Status::OK);
+        co_return;
+
+    } else if(type == "RequestRoomHistory") {
+        int32_t userid = request->userid();
+        std::string useridStr = std::to_string(userid);
+        std::string username = request->username();
+
+        std::string roomid = root["payload"]["roomId"].asString();
+
+        std::unordered_map<std::string, std::string> roomlist;
+
+        bool ok = co_await async_getRoomList_for_coro(userid, &roomlist, this->thread_pool_);
+        
+        std::unordered_map<std::string, std::string> cursors = co_await async_GetUserCursors_for_coro(this->thread_pool_,
+        this->redis_pool_, useridStr);
+
+        MessageBatch msgs = co_await async_GerHistoryMessage_for_coro(this->thread_pool_, this->redis_pool_,
+        useridStr, roomid, cursors, 10);            
+        
+        std::string RequestMessage = co_await async_MakeRequestMessage_for_coro(this->thread_pool_, &root, 
+        roomlist[roomid], msgs);
+
+        response->set_ok(true);
+        response->set_message(RequestMessage);
 
         reactor->Finish(grpc::Status::OK);
         co_return;

@@ -27,10 +27,12 @@ using grpc::Status;
 class LogicServer final : public logic::LogicServer::CallbackService {
 
 public:
+    using streamMsg = std::pair<std::string, std::unordered_map<std::string, std::string>>;
+
     LogicServer(MySQLConnPool*, sw::redis::Redis*, threadpool*);
     ~LogicServer();
 
-    grpc::ServerUnaryReactor* pullMessage(grpc::CallbackServerContext* context, const logic::pullMessageRequest* request, 
+    grpc::ServerUnaryReactor* initialPullMessage(grpc::CallbackServerContext* context, const logic::pullMessageRequest* request, 
         logic::pullMessageResponse* response) override;
 
     grpc::ServerUnaryReactor* clientMessage(grpc::CallbackServerContext* context, const logic::clientMessageRequest* request, 
@@ -40,7 +42,7 @@ public:
         logic::clearCursorsResponse* response) override;
 
 private:
-    DetachedTask DopullMessage(grpc::ServerUnaryReactor*, std::vector<std::string>, const logic::pullMessageRequest*, 
+    DetachedTask DoinitialPullMessage(grpc::ServerUnaryReactor*, const logic::pullMessageRequest*, 
         logic::pullMessageResponse*);
 
     DetachedTask DoclientMessage(grpc::ServerUnaryReactor*, const logic::clientMessageRequest*, 
