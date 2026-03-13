@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package room;
+
+message roomInfo {
+    string room_id = 1;
+}
+
+message GetUserRoomListRequest {
+    int32 userid = 1;
+    string gatewayIp = 2;
+}
+
+message GetUserRoomListResponse {
+    repeated roomInfo roomlist = 1;
+}
+
+message JoinRoomRequest {
+    int32 userid = 1;
+    string room_id = 2;
+    string gatewayIp = 3;
+}
+
+message JoinRoomResponse {
+    int32 code = 1;
+    string error_msg = 2;
+}
+
+service RoomServer {
+    rpc JoinRoom (JoinRoomRequest) returns (JoinRoomResponse);
+    rpc GetUserRoomList (GetUserRoomListRequest) returns (GetUserRoomListResponse);
+}

@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package logic;
+
+message pullMessageRequest {
+    int32 userid = 1;
+    string username = 2;
+    int32 messageCount = 3;
+}
+
+message pullMessageResponse {
+    bytes message = 1;
+}
+
+message clientMessageRequest {
+    int32 userid = 1;
+    string username = 2;
+    bytes message = 3;
+}
+
+message clientMessageResponse {
+    bool ok = 1;
+}
+
+message clearCursorsRequest {
+    int32 userid = 1;
+}
+
+message clearCursorsResponse {
+    bool ok = 1;
+}
+
+service LogicServer {
+    rpc pullMessage (pullMessageRequest) returns (pullMessageResponse);
+    rpc clientMessage (clientMessageRequest) returns (clientMessageResponse);
+    rpc clearCursors (clearCursorsRequest) returns (clearCursorsResponse);
+}
