@@ -1,57 +1,37 @@
 #pragma once
 
-#include "../../proto/logic.grpc.pb.h"
-#include "../../proto/logic.pb.h"
-
-#include "../../AuthServer/mysql/BlockQueue.h"
-#include "../../AuthServer/mysql/MySQLConn.h"
-#include "../../AuthServer/mysql/MySQLConnPool.h"
-#include "../../AuthServer/mysql/MySQLWorker.h"
-#include "../../AuthServer/mysql/SQLOperation.h"
-
-#include "../base/coroutineTask.h"
-#include "../base/threadPool.h"
-
-#include <vector>
+#include <memory>
 #include <grpcpp/grpcpp.h>
 #include <sw/redis++/redis++.h>
 
-using grpc::Server;
-using grpc::ServerBuilder;
-using grpc::ServerContext;
-using grpc::ServerReader;
-using grpc::ServerWriter;
-using grpc::ServerReaderWriter;
-using grpc::Status;
+#include "../base/ComputeThreadPool.h"
+#include "../base/OrderedThreadPool.h"
 
-class LogicServer final : public logic::LogicServer::CallbackService {
+#include "LogicGrpcServer.h"
+#include "KafkaConsumer.h"
+
+class LogicServer {
 
 public:
-    using streamMsg = std::pair<std::string, std::unordered_map<std::string, std::string>>;
-
-    LogicServer(MySQLConnPool*, sw::redis::Redis*, threadpool*);
+    LogicServer();
     ~LogicServer();
 
-    grpc::ServerUnaryReactor* initialPullMessage(grpc::CallbackServerContext* context, const logic::pullMessageRequest* request, 
-        logic::pullMessageResponse* response) override;
-
-    grpc::ServerUnaryReactor* clientMessage(grpc::CallbackServerContext* context, const logic::clientMessageRequest* request, 
-        logic::clientMessageResponse* response) override;
-
-    grpc::ServerUnaryReactor* clearCursors(grpc::CallbackServerContext* context, const logic::clearCursorsRequest* request, 
-        logic::clearCursorsResponse* response) override;
+    void start();
 
 private:
-    DetachedTask DoinitialPullMessage(grpc::ServerUnaryReactor*, const logic::pullMessageRequest*, 
-        logic::pullMessageResponse*);
+    static constexpr std::string dbname            = "chatroom";
+    static constexpr const char* url               = "tcp://127.0.0.1:3306;root;zzc1109aiw";
+    static constexpr int pool_size                 = 2;
 
-    DetachedTask DoclientMessage(grpc::ServerUnaryReactor*, const logic::clientMessageRequest*, 
-        logic::clientMessageResponse*);
+    static constexpr std::string brokers           = "";
+    static constexpr std::string groupId           = "";
 
-    DetachedTask DoclearCursors(grpc::ServerUnaryReactor*, const logic::clearCursorsRequest*, 
-        logic::clearCursorsResponse*);
+    std::unique_ptr<LogicGrpcServer> LogicGrpcService_;
+    std::unique_ptr<Server> LogicGrpcServer_;
+    // std::unique_ptr<KafkaConsumer> KafkaConsumer_;
+    std::unique_ptr<MySQLConnPool> MySQLConnPool_;
+    std::unique_ptr<sw::redis::Redis> redisPool_;
+    std::unique_ptr<ComputeThreadPool> ComputeThreadPool_;
+    std::unique_ptr<OrderedThreadPool> OrderedThreadPool_;
 
-    MySQLConnPool* mysql_pool_;
-    sw::redis::Redis* redis_pool_;
-    threadpool* thread_pool_;
 };

@@ -1,26 +1,27 @@
-#include "muduo/http/HttpServer.h"
-#include "muduo/http/HttpRequest.h"
-#include "handleHttpEvent.h"
-#include "handleUpgradeEvent.h"
-#include "grpcClient.h"
-#include "GatewayPubSubManager.h"
+#include "GatewayServer.h"
 
 int main() {
 
-    HttpServer httpserver{2};
-    grpcClientPtr grpcclient = std::make_shared<grpcClient>();
+    // HttpServer httpserver{2};
+    // grpcClientPtr grpcclient = std::make_shared<grpcClient>();
 
-    GatewayPubSubManager pubsubManager;
+    // GatewayPubSubManager pubsubManager;
 
-    httpserver.setHttpCallback([grpcclient] (TcpConnectionPtr conn, HttpRequest req) {
-        handleHttpEvent(conn, req, grpcclient);
-    });
+    // kafkaProducer producer;
 
-    httpserver.setUpgradeCallback([grpcclient] (const TcpConnectionPtr& conn, const HttpRequest& req) {
-        handleUpgradeEvent(conn, req, grpcclient);
-    });
+    // httpserver.setHttpCallback([grpcclient] (TcpConnectionPtr conn, HttpRequest req) {
+    //     handleHttpEvent(conn, req, grpcclient);
+    // });
 
-    httpserver.start();
+    // httpserver.setUpgradeCallback([grpcclient, &producer] (const TcpConnectionPtr& conn, const HttpRequest& req) {
+    //     handleUpgradeEvent(conn, req, grpcclient);
+    // });
+
+    // httpserver.start();
+
+    GatewayServer gatewayServer;
+
+    gatewayServer.start();
 
     return 0;
 }

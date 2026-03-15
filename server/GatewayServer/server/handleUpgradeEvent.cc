@@ -3,6 +3,7 @@
 #include "base/base64.h"
 #include "websocketConn.h"
 #include "GatewayPubSubManager.h"
+#include "producer.h"
 
 #include <openssl/sha.h>
 
@@ -46,7 +47,8 @@ std::string HandleUpgradeResponse(const HttpRequest& req) {
     return response;
 }
 
-void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const grpcClientPtr& client) {
+void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const grpcClientPtr& client,
+    const kafkaProducerPtr& producer) {
 
     if(conn->disconnected()) return;
 
@@ -126,11 +128,13 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
             GatewayPubSubManager::WebsockConnhash[userid] = wsContextPtr;
         }
 
-        conn->setMessageCallback([] (const TcpConnectionPtr& conn, std::string& buf) {
+        conn->setMessageCallback([producer] (const TcpConnectionPtr& conn, std::string& buf) {
             if(conn->disconnected()) return;
             WebsocketConnPtr* wsContextPtr = std::any_cast<WebsocketConnPtr>(conn->getMutableContext());
 
-            (*wsContextPtr)->onRead(conn, buf);
+            std::string data = (*wsContextPtr)->onRead(conn, buf);
+
+            // if(!data.empty()) producer->produce("chat_room_messages", data.data(), data.size(), );
         });
 
     }

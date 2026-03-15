@@ -108,7 +108,7 @@ bool WebsocketConn::isCloseFrame() { return true; }
 void WebsocketConn::send(const std::string& msg) { this->conn_->send(msg); }
 void WebsocketConn::send(const char* msg, std::size_t len) { this->conn_->send(msg, len); }
 
-void WebsocketConn::onRead(const TcpConnectionPtr& conn, std::string& buf) {
+std::string WebsocketConn::onRead(const TcpConnectionPtr& conn, std::string& buf) {
     if(conn->disconnected()) return;
 
     // 使用 while 循环，处理可能存在的多个粘包帧
@@ -161,16 +161,46 @@ void WebsocketConn::onRead(const TcpConnectionPtr& conn, std::string& buf) {
 
         buf.erase(0, offset + payload_length);
 
-        // 处理业务逻辑
         if (opcode == 0x01) { // 文本帧
+            Json::Value root;
+            Json::Reader reader;
 
-            std::string message = this->grpcClient_->rpcCilentMessage(payload_data, this->userid_, this->username_);
+            if(reader.parse(payload_data, root) && !root["type"].isNull()) {
+                std::string type = root["type"].asString();
+                if(type == "ClientMessage") {
+                    // handleClientMessage(redis, root);
+                    return payload_data;
 
-            if(!message.empty()) this->send(message);
+                } else if(type == "RequestRoomHistory") {
+                    std::string message = this->grpcClient_->rpcCilentMessage(payload_data, this->userid_, this->username_);
 
+                    if(!message.empty()) this->send(message);
+
+                    return "";
+
+                } else if(type == "clientCreateRoom") {
+                    // handleClientCreateRoom(pool, root);
+                    return "";
+                }
+            }
         } else if (opcode == 0x08) {
             // 处理 Close 帧
             disconnect();
+            return "";
         }
+
+        return "";
+
+        // 处理业务逻辑
+        // if (opcode == 0x01) { // 文本帧
+
+        //     // std::string message = this->grpcClient_->rpcCilentMessage(payload_data, this->userid_, this->username_);
+
+        //     // if(!message.empty()) this->send(message);
+
+        // } else if (opcode == 0x08) {
+        //     // 处理 Close 帧
+        //     disconnect();
+        // }
     }
 }

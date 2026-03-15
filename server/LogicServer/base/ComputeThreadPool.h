@@ -115,6 +115,10 @@ private:
         std::unique_lock<std::mutex> lock(this->produceMutex_);
         this->cond_.wait(lock, [this] { return !this->producer_.empty() || this->isblocking_.load() == false; });
 
+        if(this->producer_.empty() && this->isblocking_.load() == false) {
+            return false;
+        }
+
         std::swap(this->consumer_, this->producer_);
         return !this->consumer_.empty();
     }
@@ -129,11 +133,11 @@ private:
     std::atomic<bool> isblocking_;
 };
 
-class threadpool {
+class ComputeThreadPool {
 
 public:
-    threadpool(std::size_t threadnum = 1) : threadnum_(threadnum) {}
-    ~threadpool() {
+    ComputeThreadPool(std::size_t threadnum = 1) : threadnum_(threadnum) {}
+    ~ComputeThreadPool() {
         this->tasks_.cancel();
 
         for(auto& worker : this->worker_) {
