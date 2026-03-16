@@ -25,20 +25,6 @@ GatewayPubSubManager::GatewayPubSubManager() {
         std::string roomid = channel;
         if(roomid.rfind("room:", 0) == 0) roomid = channel.substr(5);
 
-        std::size_t colon_pos = msg.find(":");
-        if(colon_pos == std::string::npos) {
-            // 日志
-            return;
-        }
-
-        int32_t sender_userid = 0;
-        try {
-            sender_userid = std::stoi(msg.substr(0, colon_pos));
-
-        } catch(...) { return; }
-
-        std::string actual_msg = msg.substr(colon_pos + 1);
-
         std::lock_guard<std::mutex> lock(GatewayPubSubManager::WebsockConnRoomhashMutex);
 
         auto it = GatewayPubSubManager::WebsockConnRoomhash.find(roomid);
@@ -46,9 +32,7 @@ GatewayPubSubManager::GatewayPubSubManager() {
             std::unordered_set<WebsocketConnPtr>& conns = it->second;
 
             for(const auto& conn : conns) {
-                if(conn->userid() == sender_userid) continue;
-
-                conn->send(actual_msg);
+                conn->send(msg);
             }
         }
     });

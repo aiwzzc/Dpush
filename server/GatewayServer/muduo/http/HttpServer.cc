@@ -28,7 +28,7 @@ void HttpServer::onMessage(const TcpConnectionPtr& conn, std::string& buf) {
 
     HttpContext* context = std::any_cast<HttpContext>(conn->getMutableContext());
     if(context == nullptr) return;
-std::cout << buf << std::endl;
+
     if(!context->parseRequest(buf)) {
         std::string badStr("HTTP/1.1 400 Bad Request\r\n\r\n");
         conn->send(badStr);

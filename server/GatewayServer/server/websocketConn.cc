@@ -109,7 +109,7 @@ void WebsocketConn::send(const std::string& msg) { this->conn_->send(msg); }
 void WebsocketConn::send(const char* msg, std::size_t len) { this->conn_->send(msg, len); }
 
 std::string WebsocketConn::onRead(const TcpConnectionPtr& conn, std::string& buf) {
-    if(conn->disconnected()) return;
+    if(conn->disconnected()) return "";
 
     // 使用 while 循环，处理可能存在的多个粘包帧
     while (buf.size() >= 2) {
@@ -122,13 +122,13 @@ std::string WebsocketConn::onRead(const TcpConnectionPtr& conn, std::string& buf
 
         // 解析扩展长度
         if (payload_length == 126) {
-            if (buf.size() < 4) return; // 半包，等待更多数据
+            if (buf.size() < 4) return ""; // 半包，等待更多数据
 
             payload_length = (bytes[2] << 8) | bytes[3];
             offset += 2;
 
         } else if (payload_length == 127) {
-            if (buf.size() < 10) return; // 半包，等待更多数据
+            if (buf.size() < 10) return ""; // 半包，等待更多数据
 
             payload_length = 0;
             for(int i = 0; i < 8; ++i) {
@@ -139,13 +139,13 @@ std::string WebsocketConn::onRead(const TcpConnectionPtr& conn, std::string& buf
 
         // 解析掩码
         if (mask) {
-            if (buf.size() < offset + 4) return; // 半包
+            if (buf.size() < offset + 4) return ""; // 半包
             offset += 4;
         }
 
         // 检查整个帧的数据是否已经全部到达 TCP 缓冲区
         if (buf.size() < offset + payload_length) {
-            return; // 半包，退出函数，等待 muduo 下一次触发 onRead
+            return ""; // 半包，退出函数，等待 muduo 下一次触发 onRead
         }
 
         // 此时已经收到一个完整的帧，提取 Payload
@@ -171,7 +171,7 @@ std::string WebsocketConn::onRead(const TcpConnectionPtr& conn, std::string& buf
                     // handleClientMessage(redis, root);
                     return payload_data;
 
-                } else if(type == "RequestRoomHistory") {
+                } else if(type == "RequestRoomHistory" || type == "PullMissingMessages") {
                     std::string message = this->grpcClient_->rpcCilentMessage(payload_data, this->userid_, this->username_);
 
                     if(!message.empty()) this->send(message);
@@ -203,4 +203,6 @@ std::string WebsocketConn::onRead(const TcpConnectionPtr& conn, std::string& buf
         //     disconnect();
         // }
     }
+
+    return "";
 }

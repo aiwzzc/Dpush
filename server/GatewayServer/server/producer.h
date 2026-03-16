@@ -7,6 +7,11 @@
 
 class MyDeliveryReportCb;
 
+struct KafkaDeliveryContext {
+    std::weak_ptr<TcpConnection> conn_;
+    std::string msg_id_;
+};
+
 class kafkaProducer {
 
 public:

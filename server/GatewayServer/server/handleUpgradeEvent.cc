@@ -134,7 +134,21 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
 
             std::string data = (*wsContextPtr)->onRead(conn, buf);
 
-            // if(!data.empty()) producer->produce("chat_room_messages", data.data(), data.size(), );
+            if(!data.empty()) {
+                Json::Value root;
+                Json::Reader reader;
+
+                if(reader.parse(data, root)) {
+                    std::string roomid = root["payload"]["roomId"].asString();
+                    std::string clientMessageId = root["clientMessageId"].asString();
+
+                    KafkaDeliveryContext* ctx = new KafkaDeliveryContext{conn, clientMessageId};
+
+                    producer->produce("chat_room_messages", data.data(), data.size(), roomid, roomid.size(), ctx, 
+                    (*wsContextPtr)->userid(), (*wsContextPtr)->username());
+                }
+            }
+
         });
 
     }

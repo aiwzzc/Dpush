@@ -6,7 +6,7 @@
 #include "../base/typeCommon.h"
 
 KafkaConsumer::KafkaConsumer(const std::string& brokers, const std::string& group_id, 
-    const std::vector<std::string>& topics, OrderedThreadPool* ordthreadpool, 
+    std::vector<std::string> topics, OrderedThreadPool* ordthreadpool, 
     ComputeThreadPool* comthreadpool, sw::redis::Redis* redis_pool) : 
     OrderedThreadPool_(ordthreadpool), ComputeThreadPool_(comthreadpool), redis_pool_(redis_pool), running_(true) {
 
@@ -88,31 +88,31 @@ static uint64_t getCurrentTimestamp() {
     return milliseconds.count(); //单位是毫秒
 }
 
-std::string parseclientjson(Json::Value* root_, std::vector<Message>* messages_, 
-    int32_t& userid, const std::string& username, ComputeThreadPool* threadpool) {
+void parseclientjson(Json::Value* root_, std::vector<Message>& messages_, int32_t& userid, 
+    const std::string& username, ComputeThreadPool* threadpool) {
 
     Json::Value root = *root_;
     if(root["payload"].isNull()) {
         // 日志
-        return "";
+        return;
     }
     Json::Value payload = root["payload"];
 
     if(payload["roomId"].isNull()) {
         // 日志
-        return "";
+        return;
     }
     std::string roomId = payload["roomId"].asString();
 
     if(payload["messages"].isNull()) {
         // 日志
-        return "";
+        return;
     }
     Json::Value messages = payload["messages"];
 
     if(messages.isNull() || !messages.isArray()) {
         // 日志
-        return "";
+        return;
     }
 
     for(int i = 0; i < messages.size(); ++i) {
@@ -120,16 +120,14 @@ std::string parseclientjson(Json::Value* root_, std::vector<Message>* messages_,
         Message message;
         if(msg["content"].isNull()) {
             // 日志
-            return "";
+            return;
         }
         message.content = msg["content"].asString();
         message.timestamp = getCurrentTimestamp();
         message.user_id = userid;
         message.username = username;
-        messages_->push_back(message);
+        messages_.push_back(message);
     }
-
-    return roomId;
 }
 
 static std::string SerializeMessageToJson(const Message& msg) {
@@ -141,15 +139,31 @@ static std::string SerializeMessageToJson(const Message& msg) {
     return root.toStyledString();
 }
 
-void redisXadd(sw::redis::Redis* redis, std::vector<Message>& messages, 
+std::vector<std::pair<Message, long long>> redisXadd(sw::redis::Redis* redis, std::vector<Message>& messages, 
     const std::string& roomid, ComputeThreadPool* threadpool) {
 
+    std::vector<std::pair<Message, long long>> messages_Ids;
+
     for(auto& message : messages) {
+        long long msgid = redis->incr("room_seq:" + roomid);
+        messages_Ids.emplace_back(message, msgid);
+
         std::string msg_json = SerializeMessageToJson(message);
         std::vector<std::pair<std::string, std::string>> fields{{"payload", msg_json}};
 
-        message.id = redis->xadd(roomid, "*", fields.begin(), fields.end());
+        message.id = redis->xadd(roomid, std::to_string(msgid) + "-0", fields.begin(), fields.end(), 500);
     }
+
+    return messages_Ids;
+}
+
+bool redisSaddclientMessageId(sw::redis::Redis* redis, const std::string& roomid, const std::string& clientMessageId) {
+    std::string key = "clientMessageIds:" + roomid;
+    bool is_new = redis->sadd(key, clientMessageId);
+
+    if(is_new) redis->expire(key, std::chrono::seconds(3600));
+    
+    return is_new;
 }
 
 static std::string buildWebSocketFrame(const std::string& payload, uint8_t opcode = 0x01) {
@@ -176,7 +190,18 @@ static std::string buildWebSocketFrame(const std::string& payload, uint8_t opcod
     return frame;
 }
 
-std::string fillserverjson(ComputeThreadPool* threadpool, std::vector<Message>& messages_, std::string& roomid) {
+/*
+{
+  "type": "PullMissingMessages",
+  "payload": {
+    "roomId": "beast",
+    "missingMessageIds": [11, 12]
+  }
+}
+*/
+
+std::string fillserverjson(ComputeThreadPool* threadpool, std::vector<std::pair<Message, long long>>& messages_, 
+    const std::string& clientMessageId, std::string& roomid) {
     Json::Value root;
     Json::Value payload;
     Json::Value messages;
@@ -187,12 +212,14 @@ std::string fillserverjson(ComputeThreadPool* threadpool, std::vector<Message>& 
         Json::Value user;
         Json::Value Msg;
 
-        Msg["id"] = msg.id;
-        Msg["content"] = msg.content;
-        user["userid"] = msg.user_id;
-        user["username"] = msg.username;
+        Msg["clientMessageId"] = clientMessageId;
+        Msg["serverMessageId"] = std::to_string(msg.second);
+        Msg["id"] = msg.first.id;
+        Msg["content"] = msg.first.content;
+        user["userid"] = msg.first.user_id;
+        user["username"] = msg.first.username;
         Msg["user"] = user;
-        Msg["timestamp"] = msg.timestamp;
+        Msg["timestamp"] = msg.first.timestamp;
         messages.append(Msg);
     }
 
@@ -220,13 +247,30 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
         return;
     }
 
+    // 幂等性
+    std::string clientMessageId = root["clientMessageId"].asString();
+    bool is_new = redisSaddclientMessageId(this->redis_pool_, roomid, clientMessageId);
+
+    // 应该通知网关重新发送ack
+    if(!is_new) {
+        std::vector<std::pair<Message, long long>> missMessages;
+
+        // std::string resMessage = fillserverjson(this->ComputeThreadPool_, missMessages, clientMessageId, roomid);
+
+        // this->redis_pool_->publish("room:" + roomid, resMessage);
+        return ;
+    }
+
     std::vector<Message> messages;
     int32_t userid{0};
     std::string username;
 
     RdKafka::Headers* header = message->headers();
 
-    if(!header) return;
+    if(!header) {
+        std::cout << "重试" << std::endl;
+        return;
+    }
 
     auto header_list = header->get_all();
     for(const auto& hdr : header_list) {
@@ -238,18 +282,13 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
         }
     }
 
-    // std::string roomid = co_await async_parseclientjson_for_coro(&root, &messages, userid, username, this->ComputeThreadPool_);
-    std::string roomid_ = parseclientjson(&root, &messages, userid, username, this->ComputeThreadPool_);
+    parseclientjson(&root, messages, userid, username, this->ComputeThreadPool_);
 
-    // bool ok = co_await async_redisXadd_for_coro(this->redis_pool_, messages, roomid, this->ComputeThreadPool_);
-    redisXadd(this->redis_pool_, messages, roomid, this->ComputeThreadPool_);
+    std::vector<std::pair<Message, long long>> messageIds = redisXadd(this->redis_pool_, messages, roomid, this->ComputeThreadPool_);
 
-    // std::string resMessage = co_await async_fillserverjson_for_coro(this->ComputeThreadPool_, &messages, roomid);
-    std::string resMessage = fillserverjson(this->ComputeThreadPool_, messages, roomid);
+    std::string resMessage = fillserverjson(this->ComputeThreadPool_, messageIds, clientMessageId, roomid);
 
-    std::string payload_to_publish = std::to_string(userid) + ":" + resMessage;
-
-    this->redis_pool_->publish("room:" + roomid, payload_to_publish);
+    this->redis_pool_->publish("room:" + roomid, resMessage);
 
     RdKafka::Error* err = message->offset_store();
 

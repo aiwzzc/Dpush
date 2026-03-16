@@ -616,23 +616,7 @@ DetachedTask LogicGrpcServer::DoclientMessage(grpc::ServerUnaryReactor* reactor,
 
     std::string type = root["type"].asString();
 
-    if(type == "ClientMessage") {
-        // std::vector<Message> messages;
-        // int32_t userid = request->userid();
-        // std::string username = request->username();
-
-        // std::string roomid = co_await async_parseclientjson_for_coro(&root, &messages, userid, username, this->thread_pool_);
-
-        // bool ok = co_await async_redisXadd_for_coro(this->redis_pool_, messages, roomid, this->thread_pool_);
-
-        // std::string resMessage = co_await async_fillserverjson_for_coro(this->thread_pool_, &messages, roomid);
-
-        // std::string payload_to_publish = std::to_string(userid) + ":" + resMessage;
-
-        // this->redis_pool_->publish("room:" + roomid, payload_to_publish);
-
-        // response->set_ok(true);
-        // response->set_message("");
+    if(type == "PullMissingMessages") {
 
         reactor->Finish(grpc::Status::OK);
         co_return;

@@ -1,15 +1,54 @@
 #include "producer.h"
+#include <jsoncpp/json/json.h>
 
 kafkaProducer::kafkaProducer() : my_dr_cb_(std::make_unique<MyDeliveryReportCb>()) { this->init_kafka(); }
 kafkaProducer::~kafkaProducer() = default;
 
-struct KafkaDeliveryContext {
-    std::weak_ptr<WebsocketConn> conn_;
-    std::string msg_id_;
-};
+/*
+{
+  "type": "MessageAck",
+  "payload": {
+    "clientMessageId": "msg_1710000000000_a1b2c3d",
+    "status": "SUCCESS"
+  }
+}
+*/
 
-std::string packet_ack(const std::string& msg_id, std::string_view status) {
-    return "";
+static std::string buildWebSocketFrame(const std::string& payload, uint8_t opcode = 0x01) {
+    std::string frame;
+
+    frame.push_back(0x80 | (opcode & 0x0F));
+
+    size_t payload_length = payload.size();
+    if (payload_length <= 125) {
+        frame.push_back(static_cast<uint8_t>(payload_length));
+    } else if (payload_length <= 65535) {
+        frame.push_back(126);
+        frame.push_back(static_cast<uint8_t>((payload_length >> 8) & 0xFF));
+        frame.push_back(static_cast<uint8_t>(payload_length & 0xFF));
+    } else {
+        frame.push_back(127);
+        for (int i = 7; i >= 0; i--) {
+            frame.push_back(static_cast<uint8_t>((payload_length >> (8 * i)) & 0xFF));
+        }
+    }
+
+    frame += payload;
+
+    return frame;
+}
+
+std::string packet_ack(const std::string& msg_id, const std::string& status) {
+    Json::Value root;
+    Json::Value payload;
+    Json::FastWriter writer;
+
+    root["type"] = "MessageAck";
+    payload["clientMessageId"] = msg_id;
+    payload["status"] = status;
+    root["payload"] = payload;
+
+    return buildWebSocketFrame(writer.write(root));
 }
 
 class MyDeliveryReportCb : public RdKafka::DeliveryReportCb {
@@ -18,7 +57,7 @@ class MyDeliveryReportCb : public RdKafka::DeliveryReportCb {
 
         bool success = (message.err() == RdKafka::ERR_NO_ERROR);
 
-        WebsocketConnPtr conn = ctx->conn_.lock();
+        TcpConnectionPtr conn = ctx->conn_.lock();
 
         if(conn) {
             std::string ack_data = success ? packet_ack(ctx->msg_id_, "SUCCESS") : packet_ack(ctx->msg_id_, "FAILED");

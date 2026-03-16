@@ -15,7 +15,7 @@ class KafkaConsumer {
 
 public:
     KafkaConsumer(const std::string& brokers, const std::string& group_id, 
-        const std::vector<std::string>& topics, OrderedThreadPool*, ComputeThreadPool*, sw::redis::Redis*);
+        std::vector<std::string> topics, OrderedThreadPool*, ComputeThreadPool*, sw::redis::Redis*);
     ~KafkaConsumer();
 
     void start_consuming();

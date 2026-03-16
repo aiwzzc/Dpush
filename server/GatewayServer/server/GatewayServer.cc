@@ -17,7 +17,9 @@ GatewayServer::~GatewayServer() {
 
 void GatewayServer::start() {
     this->poolthread_ = std::thread([this] {
-        this->kafkaProducer_->poll(5);
+        while(1) {
+            this->kafkaProducer_->poll(5);
+        }
     });
 
     this->HttpServer_->start();

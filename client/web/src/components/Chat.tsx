@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { User, Message, Room } from '../types';
-import { Send, Image as ImageIcon, LogOut, Sparkles, Loader2, Hash, Plus, X, Users, MessageSquare } from 'lucide-react';
+import { Send, Image as ImageIcon, LogOut, Sparkles, Loader2, Hash, Plus, X, Users, MessageSquare, AlertCircle, RefreshCw } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 
 const DEFAULT_ROOMS: Room[] = [
@@ -49,6 +49,10 @@ export function Chat({ user, onLogout }: ChatProps) {
   const isAtBottomRef = useRef<boolean>(true);
   const currentRoomIdRef = useRef<string | null>(null);
   const roomScrollPositionsRef = useRef<Record<string, number>>({});
+  const networkRetryTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
+  const businessTimeoutTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
+  const roomMaxServerMsgIdRef = useRef<Record<string, number>>({});
+  const pendingMessagesRef = useRef<Record<string, Record<number, any>>>({});
 
   useEffect(() => {
     currentRoomIdRef.current = currentRoom?.id || null;
@@ -157,33 +161,147 @@ export function Chat({ user, onLogout }: ChatProps) {
           const roomId = data.payload.roomId || 'general';
           const incomingMessages = data.payload.message || [];
           
-          const parsedNewMessages: Message[] = incomingMessages.map((msg: any) => ({
-            id: msg.id || Date.now().toString(),
-            sender: msg.user?.username || 'Unknown',
-            content: msg.content,
-            timestamp: parseTimestamp(msg.timestamp),
-            type: msg.msgType || 'text',
-            imageUrl: msg.imageUrl
-          }));
-          
-          setMessages(prev => {
-            const updatedRoomMessages = [...(prev[roomId] || []), ...parsedNewMessages];
-            // 确保消息始终按时间戳升序排列（旧消息在上，新消息在下）
-            updatedRoomMessages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-            return {
-              ...prev,
-              [roomId]: updatedRoomMessages
+          let messagesToAdd: Message[] = [];
+          let hasNewMessages = false;
+
+          const processMsg = (msgRaw: any, sMsgId: number) => {
+            const parsedMsg: Message = {
+              id: msgRaw.id || Date.now().toString(),
+              clientMessageId: msgRaw.clientMessageId,
+              serverMessageId: sMsgId,
+              sender: msgRaw.user?.username || 'Unknown',
+              content: msgRaw.content,
+              timestamp: parseTimestamp(msgRaw.timestamp),
+              type: msgRaw.msgType || 'text',
+              imageUrl: msgRaw.imageUrl
             };
+            messagesToAdd.push(parsedMsg);
+            hasNewMessages = true;
+
+            if (!isNaN(sMsgId)) {
+              roomMaxServerMsgIdRef.current[roomId] = sMsgId;
+              const nextId = sMsgId + 1;
+              if (pendingMessagesRef.current[roomId] && pendingMessagesRef.current[roomId][nextId]) {
+                const nextMsgRaw = pendingMessagesRef.current[roomId][nextId];
+                delete pendingMessagesRef.current[roomId][nextId];
+                processMsg(nextMsgRaw, nextId);
+              }
+            }
+          };
+
+          // 按 serverMessageId 排序，以防后端批量下发时乱序
+          const sortedMessages = [...incomingMessages].sort((a, b) => {
+            const idA = a.serverMessageId !== undefined ? Number(a.serverMessageId) : 0;
+            const idB = b.serverMessageId !== undefined ? Number(b.serverMessageId) : 0;
+            return idA - idB;
           });
-          
-          // 收到新消息时，如果是当前房间
-          if (roomId === currentRoomIdRef.current) {
-            if (isAtBottomRef.current) {
-              // 如果用户在最底部，直接滚动
-              setTimeout(scrollToBottom, 50);
+
+          sortedMessages.forEach((msgRaw: any) => {
+            const serverMessageId = msgRaw.serverMessageId !== undefined ? Number(msgRaw.serverMessageId) : NaN;
+
+            if (!isNaN(serverMessageId)) {
+              const currentMax = roomMaxServerMsgIdRef.current[roomId];
+              
+              if (currentMax === undefined) {
+                // 第一次收到该房间的消息，初始化 maxId
+                processMsg(msgRaw, serverMessageId);
+              } else if (serverMessageId <= currentMax) {
+                // 收到重复或旧消息，忽略
+                console.log(`Ignored duplicate or old message ${serverMessageId} for room ${roomId}`);
+              } else if (serverMessageId === currentMax + 1) {
+                // 收到期望的下一条消息
+                processMsg(msgRaw, serverMessageId);
+              } else {
+                // 发现 Gap (serverMessageId > currentMax + 1)
+                if (!pendingMessagesRef.current[roomId]) {
+                  pendingMessagesRef.current[roomId] = {};
+                }
+                // 暂存这条超前的消息
+                pendingMessagesRef.current[roomId][serverMessageId] = msgRaw;
+                
+                const missingIds: number[] = [];
+                for (let id = currentMax + 1; id < serverMessageId; id++) {
+                  if (!pendingMessagesRef.current[roomId][id]) {
+                    missingIds.push(id);
+                  }
+                }
+                
+                if (missingIds.length > 0) {
+                  const delay = Math.floor(Math.random() * 1900) + 100; // 100ms - 2000ms
+                  setTimeout(() => {
+                    const currentMaxNow = roomMaxServerMsgIdRef.current[roomId] || 0;
+                    // 检查定时器触发时，这些消息是否仍然缺失
+                    const stillMissing = missingIds.filter(id => 
+                      currentMaxNow < id && !pendingMessagesRef.current[roomId]?.[id]
+                    );
+                    
+                    if (stillMissing.length > 0 && socket.readyState === WebSocket.OPEN) {
+                      const pullReq = {
+                        type: 'PullMissingMessages',
+                        payload: {
+                          roomId: roomId,
+                          missingMessageIds: stillMissing
+                        }
+                      };
+                      socket.send(JSON.stringify(pullReq));
+                    }
+                  }, delay);
+                }
+              }
             } else {
-              // 如果用户在浏览历史消息，增加未读计数
-              setUnreadCount(prev => prev + parsedNewMessages.length);
+              // 兼容没有 serverMessageId 的情况
+              processMsg(msgRaw, NaN);
+            }
+          });
+
+          if (hasNewMessages) {
+            setMessages(prev => {
+              const existingRoomMsgs = prev[roomId] || [];
+              const newRoomMsgs = [...existingRoomMsgs];
+              
+              messagesToAdd.forEach(newMsg => {
+                // 如果是我们自己发的消息，收到 ServerMessage 说明业务处理成功
+                if (newMsg.clientMessageId) {
+                  if (networkRetryTimersRef.current[newMsg.clientMessageId]) {
+                    clearInterval(networkRetryTimersRef.current[newMsg.clientMessageId]);
+                    delete networkRetryTimersRef.current[newMsg.clientMessageId];
+                  }
+                  if (businessTimeoutTimersRef.current[newMsg.clientMessageId]) {
+                    clearTimeout(businessTimeoutTimersRef.current[newMsg.clientMessageId]);
+                    delete businessTimeoutTimersRef.current[newMsg.clientMessageId];
+                  }
+                }
+
+                const existingIdx = newRoomMsgs.findIndex(m => 
+                  (m.clientMessageId && m.clientMessageId === newMsg.clientMessageId) || 
+                  m.id === newMsg.id
+                );
+
+                if (existingIdx >= 0) {
+                  // 替换乐观更新的消息，并标记为成功（取消转圈圈）
+                  newRoomMsgs[existingIdx] = {
+                    ...newRoomMsgs[existingIdx],
+                    ...newMsg,
+                    status: 'success'
+                  };
+                } else {
+                  newRoomMsgs.push({ ...newMsg, status: 'success' });
+                }
+              });
+
+              newRoomMsgs.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+              return {
+                ...prev,
+                [roomId]: newRoomMsgs
+              };
+            });
+            
+            if (roomId === currentRoomIdRef.current) {
+              if (isAtBottomRef.current) {
+                setTimeout(scrollToBottom, 50);
+              } else {
+                setUnreadCount(prev => prev + messagesToAdd.length);
+              }
             }
           }
         }
@@ -196,6 +314,7 @@ export function Chat({ user, onLogout }: ChatProps) {
 
           const parsedHistoryMessages: Message[] = incomingMessages.map((msg: any) => ({
             id: msg.id || Date.now().toString(),
+            clientMessageId: msg.clientMessageId,
             sender: msg.user?.username || 'Unknown',
             content: msg.content,
             timestamp: parseTimestamp(msg.timestamp),
@@ -235,6 +354,38 @@ export function Chat({ user, onLogout }: ChatProps) {
             setIsLoadingHistory(false);
           }, 0);
         }
+
+        // 处理消息 ACK
+        if (data.type === 'MessageAck' && data.payload) {
+          const { clientMessageId, status } = data.payload;
+          
+          if (status === 'SUCCESS') {
+            // 收到网关 ACK，停止网络重传定时器，但保持 sending 状态（转圈圈）
+            if (networkRetryTimersRef.current[clientMessageId]) {
+              clearInterval(networkRetryTimersRef.current[clientMessageId]);
+              delete networkRetryTimersRef.current[clientMessageId];
+            }
+          } else {
+            // 如果网关明确返回失败，直接标记为 failed
+            if (networkRetryTimersRef.current[clientMessageId]) {
+              clearInterval(networkRetryTimersRef.current[clientMessageId]);
+              delete networkRetryTimersRef.current[clientMessageId];
+            }
+            if (businessTimeoutTimersRef.current[clientMessageId]) {
+              clearTimeout(businessTimeoutTimersRef.current[clientMessageId]);
+              delete businessTimeoutTimersRef.current[clientMessageId];
+            }
+            setMessages(prev => {
+              const newMessages = { ...prev };
+              for (const rId in newMessages) {
+                newMessages[rId] = newMessages[rId].map(m => 
+                  m.clientMessageId === clientMessageId ? { ...m, status: 'failed' } : m
+                );
+              }
+              return newMessages;
+            });
+          }
+        }
       } catch (e) {
         console.error('Failed to parse message', e);
       }
@@ -251,6 +402,89 @@ export function Chat({ user, onLogout }: ChatProps) {
     };
   }, [user.username]);
 
+  const sendClientMessage = (roomId: string, content: string, clientMessageId: string, isRetry = false) => {
+    const newMsgObj = {
+      clientMessageId,
+      type: 'ClientMessage',
+      payload: {
+        roomId,
+        messages: [{ content, msgType: 'text' }]
+      }
+    };
+
+    const sendToWs = () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(newMsgObj));
+      }
+    };
+
+    // 首次发送
+    sendToWs();
+
+    // 1. 网络重传定时器 (2s)
+    if (networkRetryTimersRef.current[clientMessageId]) {
+      clearInterval(networkRetryTimersRef.current[clientMessageId]);
+    }
+    networkRetryTimersRef.current[clientMessageId] = setInterval(() => {
+      console.log(`[Network Retry] Resending message ${clientMessageId}...`);
+      sendToWs();
+    }, 2000);
+
+    // 2. 业务超时定时器 (10s)
+    if (businessTimeoutTimersRef.current[clientMessageId]) {
+      clearTimeout(businessTimeoutTimersRef.current[clientMessageId]);
+    }
+    businessTimeoutTimersRef.current[clientMessageId] = setTimeout(() => {
+      console.log(`[Business Timeout] Message ${clientMessageId} failed.`);
+      // 清理网络重传定时器
+      if (networkRetryTimersRef.current[clientMessageId]) {
+        clearInterval(networkRetryTimersRef.current[clientMessageId]);
+        delete networkRetryTimersRef.current[clientMessageId];
+      }
+      delete businessTimeoutTimersRef.current[clientMessageId];
+      
+      // 更新 UI 状态为 failed
+      setMessages(prev => {
+        const roomMsgs = prev[roomId] || [];
+        return {
+          ...prev,
+          [roomId]: roomMsgs.map(m => 
+            m.clientMessageId === clientMessageId ? { ...m, status: 'failed' } : m
+          )
+        };
+      });
+    }, 10000);
+
+    if (!isRetry) {
+      // 乐观更新 UI
+      const msgForState: Message = {
+        id: clientMessageId,
+        clientMessageId,
+        sender: currentUser.username,
+        content,
+        timestamp: new Date(),
+        type: 'text',
+        status: 'sending'
+      };
+      setMessages(prev => ({
+        ...prev,
+        [roomId]: [...(prev[roomId] || []), msgForState]
+      }));
+      setTimeout(scrollToBottom, 50);
+    } else {
+      // 如果是重试，把状态改回 sending
+      setMessages(prev => {
+        const roomMsgs = prev[roomId] || [];
+        return {
+          ...prev,
+          [roomId]: roomMsgs.map(m => 
+            m.clientMessageId === clientMessageId ? { ...m, status: 'sending' } : m
+          )
+        };
+      });
+    }
+  };
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputValue.trim() || !currentRoom) return;
@@ -258,41 +492,8 @@ export function Chat({ user, onLogout }: ChatProps) {
     const messageContent = inputValue;
     setInputValue('');
 
-    const newMsgObj = {
-      type: 'ClientMessage',
-      payload: {
-        roomId: currentRoom.id,
-        messages: [
-          {
-            content: messageContent,
-            msgType: 'text'
-          }
-        ]
-      }
-    };
-
-    // 通过 WebSocket 发送给后端
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(newMsgObj));
-    } else {
-      console.warn('WebSocket is not connected. Message not sent to server.');
-    }
-
-    // 乐观更新 UI
-    const msgForState: Message = {
-      id: Date.now().toString(),
-      sender: currentUser.username,
-      content: messageContent,
-      timestamp: new Date(),
-      type: 'text'
-    };
-    setMessages(prev => ({
-      ...prev,
-      [currentRoom.id]: [...(prev[currentRoom.id] || []), msgForState]
-    }));
-    
-    // 自己发消息后滚动到底部
-    setTimeout(scrollToBottom, 50);
+    const clientMessageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    sendClientMessage(currentRoom.id, messageContent, clientMessageId);
 
     // 检查是否 @ 了 AI
     if (messageContent.includes('@ai') || messageContent.includes('@AI')) {
@@ -692,6 +893,21 @@ export function Chat({ user, onLogout }: ChatProps) {
                       <div className="flex items-center gap-2">
                         {msg.isGenerating && <Loader2 size={14} className="animate-spin text-emerald-400" />}
                         <p className="whitespace-pre-wrap break-words leading-relaxed">{msg.content}</p>
+                        {isMe && msg.status === 'sending' && (
+                          <Loader2 size={14} className="animate-spin text-slate-400 ml-1 flex-shrink-0" />
+                        )}
+                        {isMe && msg.status === 'failed' && (
+                          <div className="flex items-center ml-1 flex-shrink-0 gap-1">
+                            <AlertCircle size={14} className="text-red-400" title="发送失败" />
+                            <button 
+                              onClick={() => sendClientMessage(currentRoom!.id, msg.content, msg.clientMessageId!, true)}
+                              className="text-slate-400 hover:text-white transition-colors bg-white/5 hover:bg-white/10 rounded p-0.5"
+                              title="重新发送"
+                            >
+                              <RefreshCw size={12} />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                     

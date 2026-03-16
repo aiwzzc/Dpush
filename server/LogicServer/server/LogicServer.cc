@@ -30,14 +30,19 @@ LogicServer::LogicServer() {
         throw std::runtime_error("Failed to start gRPC server! Please check port or configuration.");
     }
 
-    // this->KafkaConsumer_ = std::make_unique<KafkaConsumer>(LogicServer::brokers, LogicServer::groupId, std::vector<std::string>{});
+    std::vector<std::string> topics{"chat_room_messages"};
+
+    this->KafkaConsumer_ = std::make_unique<KafkaConsumer>(LogicServer::brokers, LogicServer::groupId, topics, 
+    this->OrderedThreadPool_.get(), this->ComputeThreadPool_.get(), this->redisPool_.get());
 }
 
-LogicServer::~LogicServer() = default;
+LogicServer::~LogicServer() { this->KafkaConsumer_->stop(); }
 
 void LogicServer::start() {
     this->ComputeThreadPool_->start();
     this->OrderedThreadPool_->start();
+
+    this->KafkaConsumer_->start();
 
     this->LogicGrpcServer_->Wait();
 }

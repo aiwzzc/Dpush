@@ -73,7 +73,6 @@ void grpcClient::rpcLogin(const HttpRequest& req, HttpResponse& res, int& errcod
     request.set_password(root["password"].asString());
     
     Status s = this->Authstub->Login(&ctx, request, &response);
-    std::cout << "login" << std::endl;
     if(s.ok()) {
         res.setCookie(response.token());
 
