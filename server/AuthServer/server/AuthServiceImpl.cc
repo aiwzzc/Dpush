@@ -38,12 +38,34 @@ struct UpdateAwaiter {
     std::string await_resume() { return this->status_; }
 };
 
+struct redisVerifyAwaiter {
+
+    sw::redis::Redis* redis_;
+    std::string_view token_;
+    sw::redis::OptionalString db_email_;
+
+    bool await_ready() const noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> handle) {
+        std::thread([this, handle]() {
+            this->db_email_ = this->redis_->get(this->token_);
+            handle.resume();
+        }).detach(); 
+    }
+
+    sw::redis::OptionalString await_resume() { return this->db_email_; }
+
+};
+
 QueryAwaiter async_query_for_coro(MySQLConnPool* pool, const std::string& sql, SQLOperation::SQLType type) {
     return QueryAwaiter{pool, sql, type, {}};
 }
 
 UpdateAwaiter async_update_for_coro(MySQLConnPool* pool, const std::string& sql, SQLOperation::SQLType type) {
     return UpdateAwaiter{pool, sql, type, ""};
+}
+
+redisVerifyAwaiter async_redisVerify_for_coro(sw::redis::Redis* redis, std::string_view token) {
+    return redisVerifyAwaiter{redis, token};
 }
 
 template <typename... Args>
@@ -64,18 +86,28 @@ std::string generateUUID() {
     return std::string(uuidStr);
 }
 
+// std::string RandomString(const int len) {
+//     /*初始化*/
+//     std::string str; /*声明用来保存随机字符串的str*/
+//     char c;     /*声明字符c，用来保存随机生成的字符*/
+//     int idx;    /*用来循环的变量*/
+//     /*循环向字符串中添加随机生成的字符*/
+//     for (idx = 0; idx < len; idx++) {
+//         /*rand()%26是取余，余数为0~25加上'a',就是字母a~z,详见asc码表*/
+//         c = 'a' + rand() % 26;
+//         str.push_back(c); /*push_back()是string类尾插函数。这里插入随机字符c*/
+//     }
+//     return str; /*返回生成的随机字符串*/
+// }
+
 std::string RandomString(const int len) {
-    /*初始化*/
-    std::string str; /*声明用来保存随机字符串的str*/
-    char c;     /*声明字符c，用来保存随机生成的字符*/
-    int idx;    /*用来循环的变量*/
-    /*循环向字符串中添加随机生成的字符*/
-    for (idx = 0; idx < len; idx++) {
-        /*rand()%26是取余，余数为0~25加上'a',就是字母a~z,详见asc码表*/
-        c = 'a' + rand() % 26;
-        str.push_back(c); /*push_back()是string类尾插函数。这里插入随机字符c*/
+    static thread_local std::mt19937 generator(std::random_device{}());
+    std::uniform_int_distribution<int> distribution('a', 'z');
+    std::string str;
+    for (int idx = 0; idx < len; idx++) {
+        str.push_back(static_cast<char>(distribution(generator)));
     }
-    return str; /*返回生成的随机字符串*/
+    return str;
 }
 
 void ApiSetCookie(sw::redis::Redis& redis, std::string email, std::string& cookie) {
@@ -214,7 +246,8 @@ grpc::ServerUnaryReactor* AuthService::Verify(grpc::CallbackServerContext* conte
 DetachedTask AuthService::DoVerifyAsync(const auth::VerifyTokenRequest* request, auth::VerifyTokenResponse* response, 
     grpc::ServerUnaryReactor* reactor) {
 
-    sw::redis::OptionalString db_email = this->redis_pool_->get(request->token());
+    // sw::redis::OptionalString db_email = this->redis_pool_->get(request->token());
+    sw::redis::OptionalString db_email = co_await async_redisVerify_for_coro(this->redis_pool_, request->token());
     if(!db_email) {
         response->set_code(-1);
         response->set_error_msg("token error");

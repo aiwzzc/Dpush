@@ -1,43 +1,29 @@
-#include "Poller.h"
-#include "Channel.h"
+// Copyright 2010, Shuo Chen.  All rights reserved.
+// http://code.google.com/p/muduo/
+//
+// Use of this source code is governed by a BSD-style license
+// that can be found in the License file.
 
-#include <sys/epoll.h>
-#include <unistd.h>
-#include <stdio.h>
+// Author: Shuo Chen (chenshuo at chenshuo dot com)
 
-Epoller::Epoller() : epfd_(epoll_create1(EPOLL_CLOEXEC)) {}
-Epoller::~Epoller() { ::close(this->epfd_); }
+#include "muduo/net/Poller.h"
 
-void Epoller::poll(int timeout, std::vector<std::pair<Channel*, int>>& channels) {
-    int nready = epoll_wait(this->epfd_, evs, this->EpollEventSize, timeout);
+#include "muduo/net/Channel.h"
 
-    for(int i = 0; i < nready; ++i) {
-        uint32_t ev = this->evs[i].events;
-        channels.push_back({(Channel*)this->evs[i].data.ptr, ev});
-    }
+using namespace muduo;
+using namespace muduo::net;
+
+Poller::Poller(EventLoop* loop)
+  : ownerLoop_(loop)
+{
 }
 
-void Epoller::updateChannel(Channel* channel) {
-    epoll_event ev;
-    ev.data.ptr = channel;
-    ev.events = channel->events();
-    
-    int fd = channel->fd();
-    int index = channel->index();
+Poller::~Poller() = default;
 
-    if(index == -1 || index == 2) {
-        channel->setIndex(1);
-        if(epoll_ctl(this->epfd_, EPOLL_CTL_ADD, fd, &ev) < 0) {
-            perror("epoll_ctl ADD failed");
-        }
-
-    } else {
-        if(epoll_ctl(this->epfd_, EPOLL_CTL_MOD, fd, &ev) < 0) {
-            perror("epoll_ctl MOD failed");
-        }
-    }
+bool Poller::hasChannel(Channel* channel) const
+{
+  assertInLoopThread();
+  ChannelMap::const_iterator it = channels_.find(channel->fd());
+  return it != channels_.end() && it->second == channel;
 }
 
-void Epoller::removeChannel(Channel* channel) {
-    epoll_ctl(this->epfd_, EPOLL_CTL_DEL, channel->fd(), nullptr);
-}

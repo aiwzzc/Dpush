@@ -13,6 +13,8 @@
 
 class HttpRequest;
 
+using muduo::net::TcpConnectionPtr;
+
 struct WebSocketFrame {
     bool fin;
     uint8_t opcode;
@@ -32,7 +34,7 @@ public:
     WebsocketConn(const TcpConnectionPtr&);
     ~WebsocketConn();
 
-    std::string onRead(const TcpConnectionPtr& conn, std::string& buf);
+    std::string onRead(const TcpConnectionPtr& conn, muduo::net::Buffer* buf);
     void setUserid(int32_t userid);
     void setUsername(const std::string&);
     void setWebconnCloseCallback(const WebconnCloseCallback& cb);

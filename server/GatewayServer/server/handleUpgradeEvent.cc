@@ -1,5 +1,5 @@
 #include "handleUpgradeEvent.h"
-#include "muduo/http/HttpRequest.h"
+#include "httpServer/HttpRequest.h"
 #include "base/base64.h"
 #include "websocketConn.h"
 #include "GatewayPubSubManager.h"
@@ -128,11 +128,11 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
             GatewayPubSubManager::WebsockConnhash[userid] = wsContextPtr;
         }
 
-        conn->setMessageCallback([producer] (const TcpConnectionPtr& conn, std::string& buf) {
+        conn->setMessageCallback([producer] (const TcpConnectionPtr& conn, muduo::net::Buffer* buffer, muduo::Timestamp) {
             if(conn->disconnected()) return;
             WebsocketConnPtr* wsContextPtr = std::any_cast<WebsocketConnPtr>(conn->getMutableContext());
 
-            std::string data = (*wsContextPtr)->onRead(conn, buf);
+            std::string data = (*wsContextPtr)->onRead(conn, buffer);
 
             if(!data.empty()) {
                 Json::Value root;

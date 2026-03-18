@@ -4,11 +4,15 @@
 #include <memory>
 
 #include "websocketConn.h"
+#include "muduo/net/TcpConnection.h"
 
 class MyDeliveryReportCb;
+class TcpConnection;
+
+using muduo::net::TcpConnectionPtr;
 
 struct KafkaDeliveryContext {
-    std::weak_ptr<TcpConnection> conn_;
+    std::weak_ptr<muduo::net::TcpConnection> conn_;
     std::string msg_id_;
 };
 

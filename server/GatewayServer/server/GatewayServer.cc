@@ -1,7 +1,8 @@
 #include "GatewayServer.h"
 #include "producer.h"
 
-GatewayServer::GatewayServer() : HttpServer_(std::make_unique<HttpServer>(2)), grpcClient_(std::make_shared<grpcClient>()),
+GatewayServer::GatewayServer() : HttpServer_(std::make_unique<HttpServer>(muduo::net::InetAddress{"0.0.0.0", 5005}, "HttpServer", 6)), 
+grpcClient_(std::make_shared<grpcClient>()),
 GatewayPubSubManager_(std::make_unique<GatewayPubSubManager>()), kafkaProducer_(std::make_shared<kafkaProducer>()) {
     this->HttpServer_->setHttpCallback([this] (TcpConnectionPtr conn, HttpRequest req) {
         handleHttpEvent(conn, req, this->grpcClient_);

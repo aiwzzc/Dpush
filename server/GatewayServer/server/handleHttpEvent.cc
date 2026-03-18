@@ -1,7 +1,7 @@
 #include "handleHttpEvent.h"
 
-#include "muduo/http/HttpRequest.h"
-#include "muduo/http/HttpResponse.h"
+#include "httpServer/HttpRequest.h"
+#include "httpServer/HttpResponse.h"
 
 #include <string>
 #include <iostream>
@@ -39,6 +39,16 @@ void encodeLoginJson(grpcClient::api_error_id id, const std::string& message, st
     root["message"] = message;
     Json::FastWriter writer;
     resp_json = writer.write(root);
+}
+#include <uuid/uuid.h>
+static std::string generateUUID() {
+    uuid_t uuid;
+    uuid_generate_time_safe(uuid);  //调用uuid的接口
+ 
+    char uuidStr[40] = {0};
+    uuid_unparse(uuid, uuidStr);     //调用uuid的接口
+ 
+    return std::string(uuidStr);
 }
 
 void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const grpcClientPtr& client) {
@@ -106,6 +116,7 @@ void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const
             res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
             res.setStatusMessage("OK");
             res.setCloseConnection(true);
+            res.setCookie(generateUUID());
             res.setBody("{}");
 
             sendResponse(res);

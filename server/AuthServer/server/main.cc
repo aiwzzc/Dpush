@@ -11,7 +11,7 @@
 
 constexpr std::string dbname            = "chatroom";
 constexpr const char* url               = "tcp://127.0.0.1:3306;root;zzc1109aiw";
-constexpr int pool_size                 = 2;
+constexpr int pool_size                 = 6;
 
 int main() {
 
@@ -23,7 +23,7 @@ int main() {
     connection_options.port = 6379;
 
     sw::redis::ConnectionPoolOptions pool_options;
-    pool_options.size = 1;
+    pool_options.size = 50;
 
     sw::redis::Redis redis(connection_options, pool_options);
 

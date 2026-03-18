@@ -1,75 +1,89 @@
-#include "Acceptor.h"
-#include "Channel.h"
-#include "EventLoop.h"
-#include "Poller.h"
+// Copyright 2010, Shuo Chen.  All rights reserved.
+// http://code.google.com/p/muduo/
+//
+// Use of this source code is governed by a BSD-style license
+// that can be found in the License file.
 
-#include <sys/socket.h>
-#include <netinet/in.h>
+// Author: Shuo Chen (chenshuo at chenshuo dot com)
+
+#include "muduo/net/Acceptor.h"
+
+#include "muduo/base/Logging.h"
+#include "muduo/net/EventLoop.h"
+#include "muduo/net/InetAddress.h"
+#include "muduo/net/SocketsOps.h"
+
+#include <errno.h>
 #include <fcntl.h>
-#include <sys/epoll.h>
+//#include <sys/types.h>
+//#include <sys/stat.h>
+#include <unistd.h>
 
-namespace {
+using namespace muduo;
+using namespace muduo::net;
 
-int set_nonblocking(int fd) {
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags == -1) return -1;
-    return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+Acceptor::Acceptor(EventLoop* loop, const InetAddress& listenAddr, bool reuseport)
+  : loop_(loop),
+    acceptSocket_(sockets::createNonblockingOrDie(listenAddr.family())),
+    acceptChannel_(loop, acceptSocket_.fd()),
+    listening_(false),
+    idleFd_(::open("/dev/null", O_RDONLY | O_CLOEXEC))
+{
+  assert(idleFd_ >= 0);
+  acceptSocket_.setReuseAddr(true);
+  acceptSocket_.setReusePort(reuseport);
+  acceptSocket_.bindAddress(listenAddr);
+  acceptChannel_.setReadCallback(
+      std::bind(&Acceptor::handleRead, this));
 }
 
-};
+Acceptor::~Acceptor()
+{
+  acceptChannel_.disableAll();
+  acceptChannel_.remove();
+  ::close(idleFd_);
+}
 
-Acceptor::Acceptor(EventLoop* loop) {
-    int listenfd = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-    if(listenfd < 0) this->listench_ = nullptr;
-    else {
-        set_nonblocking(listenfd);
+void Acceptor::listen()
+{
+  loop_->assertInLoopThread();
+  listening_ = true;
+  acceptSocket_.listen();
+  acceptChannel_.enableReading();
+}
 
-        int reuse = 1;
-	    setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (char *)&reuse, sizeof(reuse));
-
-        sockaddr_in serveraddr{};
-        serveraddr.sin_family = AF_INET;
-        serveraddr.sin_port = htons(5005);
-        serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
-
-        if(::bind(listenfd, (sockaddr*)(&serveraddr), sizeof(serveraddr)) < 0) {
-            perror("bind failed");
-            return;
-        }
-
-        this->listench_ = new Channel{loop, listenfd};
-        this->listench_->setReadCallback([this] { acceptNewConnection(); });
+void Acceptor::handleRead()
+{
+  loop_->assertInLoopThread();
+  InetAddress peerAddr;
+  //FIXME loop until no more
+  int connfd = acceptSocket_.accept(&peerAddr);
+  if (connfd >= 0)
+  {
+    // string hostport = peerAddr.toIpPort();
+    // LOG_TRACE << "Accepts of " << hostport;
+    if (newConnectionCallback_)
+    {
+      newConnectionCallback_(connfd, peerAddr);
     }
-}
-
-Acceptor::~Acceptor() {
-    this->listench_->loop()->epoller()->removeChannel(this->listench_);
-    ::close(this->listench_->fd());
-
-    delete this->listench_;
-}
-
-void Acceptor::start() {
-    ::listen(this->listench_->fd(), SOMAXCONN);
-    
-    this->listench_->enableReading();
-}
-
-void Acceptor::acceptNewConnection() {
-    sockaddr_in clientaddr;
-    socklen_t addrlen = sizeof(sockaddr);
-
-    while(1) {
-        int connfd = accept4(this->listench_->fd(), (sockaddr*)&clientaddr, &addrlen, SOCK_NONBLOCK | SOCK_CLOEXEC);
-        if(connfd < 0) {
-            if(errno == EAGAIN || errno == EWOULDBLOCK) break; // 处理完毕
-            if(errno == EINTR) continue; // 信号中断
-            return; // 其他错误
-        }
-
-        if(this->newconnectioncallback_) this->newconnectioncallback_(connfd);
-        else ::close(connfd);
+    else
+    {
+      sockets::close(connfd);
     }
+  }
+  else
+  {
+    LOG_SYSERR << "in Acceptor::handleRead";
+    // Read the section named "The special problem of
+    // accept()ing when you can't" in libev's doc.
+    // By Marc Lehmann, author of libev.
+    if (errno == EMFILE)
+    {
+      ::close(idleFd_);
+      idleFd_ = ::accept(acceptSocket_.fd(), NULL, NULL);
+      ::close(idleFd_);
+      idleFd_ = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
+    }
+  }
 }
 
-void Acceptor::setNewConnectionCallback(const NewConnectionCallback& cb) { this->newconnectioncallback_ = std::move(cb); }

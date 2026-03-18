@@ -1,6 +1,7 @@
 #pragma once
 
 #include "muduo/net/TcpServer.h"
+#include "muduo/net/EventLoop.h"
 
 #include <string>
 #include <iostream>
@@ -45,7 +46,10 @@
     "Content-Type:application/json;charset=utf-8\r\n\r\n%s"
 
 class TcpConnection;
-using TcpConnectionPtr = std::shared_ptr<TcpConnection>;
+
+using muduo::net::TcpConnectionPtr;
+using muduo::net::EventLoop;
+using muduo::net::TcpServer;
 
 class HttpRequest;
 class HttpResponse;
@@ -56,7 +60,7 @@ public:
     using HttpCallback = std::function<void(TcpConnectionPtr conn, HttpRequest)>;
     using UpgradeCallback = std::function<void(const TcpConnectionPtr&, const HttpRequest&)>;
 
-    HttpServer(int numEventLoop);
+    HttpServer(const muduo::net::InetAddress &addr, const std::string& name, int num_event_loops);
     ~HttpServer();
 
     void start();
@@ -65,11 +69,12 @@ public:
 
 private:
     void onConnection(const TcpConnectionPtr& conn);
-    void onMessage(const TcpConnectionPtr& conn, std::string& buf);
+    void onMessage(const TcpConnectionPtr& conn, std::string buf);
     void onRequest(const TcpConnectionPtr& conn, const HttpRequest& request);
     void defaultHttpCallback(const TcpConnectionPtr&, const HttpRequest&);
 
-    TcpServer server_;
+    std::unique_ptr<EventLoop> loop_;
+    std::unique_ptr<TcpServer> server_;
     HttpCallback httpCallback_;
     UpgradeCallback upgradeCallback_;
 };

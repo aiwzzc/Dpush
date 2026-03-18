@@ -1,7 +1,7 @@
 #include "grpcClient.h"
 
-#include "muduo/http/HttpRequest.h"
-#include "muduo/http/HttpResponse.h"
+#include "httpServer/HttpResponse.h"
+#include "httpServer/HttpRequest.h"
 
 #include <jsoncpp/json/json.h>
 
@@ -74,11 +74,15 @@ void grpcClient::rpcLogin(const HttpRequest& req, HttpResponse& res, int& errcod
     
     Status s = this->Authstub->Login(&ctx, request, &response);
     if(s.ok()) {
-        res.setCookie(response.token());
+        if(response.code() < 0) {
+            errcode = response.code();
+            errmsg.assign(response.error_msg());
 
-    } else {
-        errcode = response.code();
-        errmsg.assign(response.error_msg());
+            return;
+        }
+        
+        errcode = 1;
+        res.setCookie(response.token());
     }
 }
 

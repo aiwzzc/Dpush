@@ -5,15 +5,25 @@
 #include "muduo/net/EventLoop.h"
 #include "muduo/net/TcpConnection.h"
 
-HttpServer::HttpServer(int numEventLoop) : server_(numEventLoop) {
-    this->server_.setMessageCallback([this] (const TcpConnectionPtr& conn, std::string& buf) { onMessage(conn, buf); });
-    this->server_.setConnectionCallback([this] (const TcpConnectionPtr& conn) { onConnection(conn); });
+HttpServer::HttpServer(const muduo::net::InetAddress &addr, const std::string& name, int num_event_loops):
+    loop_(std::make_unique<EventLoop>()), 
+    server_(std::make_unique<TcpServer>(this->loop_.get(), addr, name)) {
+    this->server_->setMessageCallback([this] (const TcpConnectionPtr& conn, muduo::net::Buffer* buf, muduo::Timestamp) {
+        onMessage(conn, buf->retrieveAsString(buf->readableBytes()));
+    });
+
+    this->server_->setConnectionCallback([this] (const TcpConnectionPtr& conn) { onConnection(conn); });
     setHttpCallback([this] (const TcpConnectionPtr& conn, const HttpRequest& req) { defaultHttpCallback(conn, req); });
+
+    this->server_->setThreadNum(num_event_loops);
 }
 
 HttpServer::~HttpServer() = default;
 
-void HttpServer::start() { this->server_.start(); }
+void HttpServer::start() {
+    this->server_->start();
+    this->loop_->loop(1000);
+}
 
 void HttpServer::setHttpCallback(const HttpCallback& cb) { this->httpCallback_ = std::move(cb); }
 
@@ -23,7 +33,7 @@ void HttpServer::onConnection(const TcpConnectionPtr& conn) {
     conn->setContext(HttpContext{});
 }
 
-void HttpServer::onMessage(const TcpConnectionPtr& conn, std::string& buf) {
+void HttpServer::onMessage(const TcpConnectionPtr& conn, std::string buf) {
     if(conn->disconnected()) return;
 
     HttpContext* context = std::any_cast<HttpContext>(conn->getMutableContext());
@@ -58,7 +68,7 @@ void HttpServer::onRequest(const TcpConnectionPtr& conn, const HttpRequest& requ
     this->httpCallback_(conn, request);
 }
 
-void HttpServer::defaultHttpCallback(const TcpConnectionPtr& conn, const HttpRequest& req) {
+void HttpServer::defaultHttpCallback(const muduo::net::TcpConnectionPtr& conn, const HttpRequest& req) {
     if(conn->disconnected()) return;
 
     HttpResponse res{true};

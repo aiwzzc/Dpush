@@ -5,4 +5,6 @@
 
 class HttpRequest;
 
+using muduo::net::TcpConnectionPtr;
+
 void handleHttpEvent(const TcpConnectionPtr&, const HttpRequest&, const grpcClientPtr&);
