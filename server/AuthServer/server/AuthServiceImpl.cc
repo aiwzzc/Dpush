@@ -1,4 +1,5 @@
 #include "AuthServiceImpl.h"
+#include <jwt.h>
 
 struct QueryAwaiter {
 
@@ -110,11 +111,6 @@ std::string RandomString(const int len) {
     return str;
 }
 
-void ApiSetCookie(sw::redis::Redis& redis, std::string email, std::string& cookie) {
-    cookie.assign(generateUUID());
-    redis.setex(cookie, 86400, email);
-}
-
 Task<int> verifyUserPassword(MySQLConnPool* pool, const std::string& email, 
     const std::string& password, int32_t& userid, std::string& username) {
     std::string strSql = FormatString("select id, username, password, salt from users where email = '%s'", email.c_str());
@@ -138,7 +134,33 @@ Task<int> verifyUserPassword(MySQLConnPool* pool, const std::string& email,
     co_return 0;
 }
 
-AuthService::AuthService(MySQLConnPool* pool, sw::redis::Redis* redis) : mysql_pool_(pool), redis_pool_(redis) {}
+static char* read_file(const char* filename) {
+    FILE* f = fopen(filename, "rb");
+    if (!f) {
+        perror("fopen");
+        return NULL;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    rewind(f);
+
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) {
+        fclose(f);
+        return NULL;
+    }
+
+    fread(buf, 1, len, f);
+    buf[len] = '\0';  // 一定要加
+
+    fclose(f);
+    return buf;
+}
+
+AuthService::AuthService(MySQLConnPool* pool, sw::redis::Redis* redis) : mysql_pool_(pool), redis_pool_(redis) {
+    this->private_key = read_file("../base/private.pem");
+}
 AuthService::~AuthService() = default;
 
 grpc::ServerUnaryReactor* AuthService::Login(grpc::CallbackServerContext* context, const auth::LoginRequest* request, 
@@ -171,14 +193,31 @@ DetachedTask AuthService::DoLoginAsync(const auth::LoginRequest* request, auth::
             response->set_error_msg("密码错误");
         }
 
-        // reactor->Finish(grpc::Status::);
-
     } else {
-        std::string token;
-        ApiSetCookie(*this->redis_pool_, email, token);
+        jwt_t* jwt = nullptr;
+
+        if(jwt_new(&jwt) != 0) {
+            reactor->Finish(grpc::Status::OK);
+
+            co_return;
+        }
+
+        jwt_add_grant_int(jwt, "userid", userid);
+        jwt_add_grant(jwt, "username", username.c_str());
+        jwt_add_grant_int(jwt, "exp", (long)time(NULL) + 3600 * 24); 
+
+        jwt_set_alg(jwt, JWT_ALG_RS256, (unsigned char*)this->private_key, strlen(this->private_key));
+
+        char* token_ptr = jwt_encode_str(jwt);
+
+        std::string token(token_ptr);
+
         response->set_token(token);
         response->set_userid(userid);
         response->set_username(username);
+
+        free(token_ptr);
+        jwt_free(jwt);
     }
 
     reactor->Finish(grpc::Status::OK);

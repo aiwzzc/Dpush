@@ -40,16 +40,6 @@ void encodeLoginJson(grpcClient::api_error_id id, const std::string& message, st
     Json::FastWriter writer;
     resp_json = writer.write(root);
 }
-#include <uuid/uuid.h>
-static std::string generateUUID() {
-    uuid_t uuid;
-    uuid_generate_time_safe(uuid);  //调用uuid的接口
- 
-    char uuidStr[40] = {0};
-    uuid_unparse(uuid, uuidStr);     //调用uuid的接口
- 
-    return std::string(uuidStr);
-}
 
 void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const grpcClientPtr& client) {
     if(conn->disconnected()) return;
@@ -59,7 +49,7 @@ void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const
 
     HttpResponse res{close};
 
-    auto sendResponse = [&conn] (const HttpResponse& res) {
+    auto sendResponse = [] (const TcpConnectionPtr& conn, const HttpResponse& res) {
         std::string resJson{};
         res.appendToBuffer(resJson);
         conn->send(resJson);
@@ -70,7 +60,32 @@ void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const
     if(req.path() == "/api/reg") {
         int ret{0};
         std::string errmsg{""};
-        client->rpcRegister(req, res, ret, errmsg);
+        
+        client->rpcRegisterAsync(req, ret, errmsg, [conn, close, sendResponse] (RegisterInfo info) {
+            HttpResponse res{close};
+
+            if(info.errcode < 0) {
+                std::string resJson;
+                std::optional<grpcClient::api_error_id> opt = grpcClient::to_api_error_id(info.errcode);
+                if(!opt.has_value()) return;
+                encodeLoginJson(*opt, info.errmsg, resJson);
+
+                res.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
+                res.setStatusMessage("Bad Request");
+                res.setCloseConnection(true);
+                res.setBody(resJson);
+
+                sendResponse(conn, res);
+
+            } else {
+                res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
+                res.setStatusMessage("OK");
+                res.setCloseConnection(true);
+                res.setBody("{}");
+
+                sendResponse(conn, res);
+            }
+        });
 
         if(ret < 0) {
             std::string resJson;
@@ -83,21 +98,39 @@ void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const
             res.setCloseConnection(true);
             res.setBody(resJson);
 
-            sendResponse(res);
-
-        } else {
-            res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
-            res.setStatusMessage("OK");
-            res.setCloseConnection(true);
-            res.setBody("{}");
-
-            sendResponse(res);
+            sendResponse(conn, res);
         }
 
     } else if(req.path() == "/api/login") {
         int ret{0};
         std::string errmsg{""};
-        client->rpcLogin(req, res, ret, errmsg);
+
+        client->rpcLoginAsync(req, ret, errmsg, [conn, close, sendResponse] (LogicInfo info) {
+            HttpResponse res{close};
+
+            if(info.errcode < 0) {
+                std::string resJson;
+                std::optional<grpcClient::api_error_id> opt = grpcClient::to_api_error_id(info.errcode);
+                if(!opt.has_value()) return;
+                encodeLoginJson(*opt, info.errmsg, resJson);
+
+                res.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
+                res.setStatusMessage("Bad Request");
+                res.setCloseConnection(true);
+                res.setBody(resJson);
+
+                sendResponse(conn, res);
+
+            } else {
+                res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
+                res.setStatusMessage("OK");
+                res.setCloseConnection(true);
+                res.setCookie(info.token);
+                res.setBody("{}");
+
+                sendResponse(conn, res);
+            }
+        });
 
         if(ret < 0) {
             std::string resJson;
@@ -110,16 +143,7 @@ void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const
             res.setCloseConnection(true);
             res.setBody(resJson);
 
-            sendResponse(res);
-
-        } else {
-            res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
-            res.setStatusMessage("OK");
-            res.setCloseConnection(true);
-            res.setCookie(generateUUID());
-            res.setBody("{}");
-
-            sendResponse(res);
+            sendResponse(conn, res);
         }
 
     } else {
@@ -133,7 +157,7 @@ void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const
             res.setStatusMessage("Forbidden");
             res.setCloseConnection(true);
 
-            sendResponse(res);
+            sendResponse(conn, res);
 
             return;
         }
@@ -154,7 +178,7 @@ void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const
             res.setBody(content);
             res.setContentType(GetMimeType(file_path));
 
-            sendResponse(res);
+            sendResponse(conn, res);
 
         } else {
             // 找不到文件时的处理逻辑 (SPA Fallback)
@@ -164,7 +188,7 @@ void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const
                 res.setStatusMessage("Not Found");
                 res.setCloseConnection(true);
 
-                sendResponse(res);
+                sendResponse(conn, res);
 
             } else {
                 // 对于 React 单页应用，如果用户刷新了某个前端路由（如 /chat），
@@ -177,14 +201,14 @@ void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const
                     res.setBody(index_content);
                     res.setContentType("text/html;charset=utf-8");
 
-                    sendResponse(res);
+                    sendResponse(conn, res);
 
                 } else {
                     res.setStatusCode(HttpResponse::HttpStatusCode::k404NotFound);
                     res.setStatusMessage("Not Found");
                     res.setCloseConnection(true);
 
-                    sendResponse(res);
+                    sendResponse(conn, res);
                 }
             }
         }

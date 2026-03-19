@@ -47,11 +47,12 @@ std::optional<grpcClient::api_error_id> grpcClient::to_api_error_id(int v) {
     }
 }
 
+void grpcClient::rpcLoginAsync(const HttpRequest& req, int& errcode, std::string& errmsg, 
+    std::function<void(LogicInfo)> callback) {
 
-void grpcClient::rpcLogin(const HttpRequest& req, HttpResponse& res, int& errcode, std::string& errmsg) {
-    ClientContext ctx;
-    auth::LoginRequest request;
-    auth::LoginResponse response;
+    auto context = std::make_shared<ClientContext>();
+    auto request = std::make_shared<auth::LoginRequest>();
+    auto response = std::make_shared<auth::LoginResponse>();
 
     Json::Value root;
     Json::Reader reader;
@@ -69,27 +70,24 @@ void grpcClient::rpcLogin(const HttpRequest& req, HttpResponse& res, int& errcod
         return;
     }
 
-    request.set_email(root["email"].asString());
-    request.set_password(root["password"].asString());
+    request->set_email(root["email"].asString());
+    request->set_password(root["password"].asString());
     
-    Status s = this->Authstub->Login(&ctx, request, &response);
-    if(s.ok()) {
-        if(response.code() < 0) {
-            errcode = response.code();
-            errmsg.assign(response.error_msg());
-
-            return;
+    this->Authstub->async()->Login(context.get(), request.get(), response.get(), 
+    [request, response, context, callback] (grpc::Status s) {
+        if(s.ok()) {
+            LogicInfo info = LogicInfo{response->code(), response->error_msg(), response->token()};
+            callback(info);
         }
-        
-        errcode = 1;
-        res.setCookie(response.token());
-    }
+    });
 }
 
-void grpcClient::rpcRegister(const HttpRequest& req, HttpResponse& res, int& errcode, std::string& errmsg) {
-    ClientContext ctx;
-    auth::RegisterRequest request;
-    auth::RegisterResponse response;
+void grpcClient::rpcRegisterAsync(const HttpRequest& req, int& errcode, std::string& errmsg, 
+    std::function<void(RegisterInfo)> callback) {
+
+    auto context = std::make_shared<ClientContext>();
+    auto request = std::make_shared<auth::RegisterRequest>();
+    auto response = std::make_shared<auth::RegisterResponse>();
 
     Json::Value root;
     Json::Reader reader;
@@ -108,104 +106,105 @@ void grpcClient::rpcRegister(const HttpRequest& req, HttpResponse& res, int& err
         return;
     }
 
-    request.set_username(root["username"].asString());
-    request.set_email(root["email"].asString());
-    request.set_password(root["password"].asString());
+    request->set_username(root["username"].asString());
+    request->set_email(root["email"].asString());
+    request->set_password(root["password"].asString());
 
-    Status s = this->Authstub->Register(&ctx, request, &response);
-    if(s.ok() && response.code() < 0) {
-        errcode = response.code();
-        errmsg.assign(response.error_msg());
-    }
-}
-
-void grpcClient::rpcVerify(const std::string& token, int32_t& userid, std::string& username, int& errcode) {
-    ClientContext ctx;
-    auth::VerifyTokenRequest request;
-    auth::VerifyTokenResponse response;
-
-    request.set_token(token);
-    Status s = this->Authstub->Verify(&ctx, request, &response);
-
-    if(s.ok()) {
-        if(response.code() < 0) {
-            errcode = response.code();
-
-            return;
+    this->Authstub->async()->Register(context.get(), request.get(), response.get(), 
+    [request, response, context, callback] (grpc::Status s) {
+        if(s.ok()) {
+            RegisterInfo info = RegisterInfo{response->code(), response->error_msg()};
+            callback(info);
         }
-
-        userid = response.userid();
-        username.assign(response.username());
-    }
+    });
 }
 
-std::string grpcClient::rpcinitialPullMessage(const int32_t& userid, const std::string& username, const int messagecount) {
-    ClientContext ctx;
-    logic::pullMessageRequest request;
-    logic::pullMessageResponse response;
+void grpcClient::rpcinitialPullMessageAsync(int32_t userid, std::string username, const int messagecount,
+    std::function<void(std::string)> callback) {
 
-    request.set_userid(userid);
-    request.set_username(username);
-    request.set_messagecount(messagecount);
+    auto request = std::make_shared<logic::pullMessageRequest>();
+    auto response = std::make_shared<logic::pullMessageResponse>();
+    auto context = std::make_shared<ClientContext>();
 
-    Status s = this->Logicstub->initialPullMessage(&ctx, request, &response);
-    std::string helloMessage;
+    request->set_userid(userid);
+    request->set_username(std::move(username));
+    request->set_messagecount(messagecount);
 
-    if(s.ok()) helloMessage = response.message();
+    this->Logicstub->async()->initialPullMessage(context.get(), request.get(), response.get(),
+    [request, response, context, callback] (grpc::Status s) {
+        if(s.ok() && !response->message().empty()) {
+            callback(response->message());
 
-    return helloMessage;
-}
-
-std::string grpcClient::rpcCilentMessage(const std::string& message, int32_t& userid, const std::string& username) {
-    ClientContext ctx;
-    logic::clientMessageRequest request;
-    logic::clientMessageResponse response;
-
-    request.set_message(message);
-    request.set_userid(userid);
-    request.set_username(username);
-
-    Status s = this->Logicstub->clientMessage(&ctx, request, &response);
-
-    if(s.ok() && !response.message().empty()) return response.message();
-
-    return "";
-}
-
-void grpcClient::rpcclearCursors(const int32_t& userid) {
-    ClientContext ctx;
-    logic::clearCursorsRequest request;
-    logic::clearCursorsResponse response;
-
-    request.set_userid(userid);
-
-    Status s = this->Logicstub->clearCursors(&ctx, request, &response);
-
-    if(s.ok()) return;
-
-    return;
-}
-
-std::vector<std::string> grpcClient::rpcGetUserRoomList(const int32_t& userid) {
-    ClientContext ctx;
-    room::GetUserRoomListRequest request;
-    room::GetUserRoomListResponse response;
-
-    request.set_userid(userid);
-
-    Status s = this->RoomStub->GetUserRoomList(&ctx, request, &response);
-    std::vector<std::string> roomlist;
-
-    if(s.ok()) {
-        for(const auto& roominfo : response.roomlist()) {
-            std::string roomid = roominfo.room_id();
-            std::size_t colon_pos = roomid.find(":");
-            if(colon_pos == std::string::npos) return {};
-
-            std::string real_roomid = roomid.substr(0, colon_pos);
-            roomlist.emplace_back(real_roomid);
+        } else {
+            callback("");
         }
-    }
+    });
+}
 
-    return roomlist;
+void grpcClient::rpcCilentMessageAsync(const std::string& message, int32_t userid, std::string username,
+    std::function<void(std::string)> callback) {
+
+    auto request = std::make_shared<logic::clientMessageRequest>();
+
+    request->set_message(std::move(message));
+    request->set_userid(userid);
+    request->set_username(username);
+
+    auto response = std::make_shared<logic::clientMessageResponse>();
+    auto context = std::make_shared<ClientContext>();
+
+    auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
+    context->set_deadline(deadline);
+
+    this->Logicstub->async()->clientMessage(context.get(), request.get(), response.get(), 
+        [request, response, context, callback] (grpc::Status s) {
+            if(s.ok() && !response->message().empty()) {
+                callback(response->message());
+
+            } else {
+                callback("");
+            }
+        });
+}
+
+void grpcClient::rpcclearCursorsAsync(int32_t userid, std::function<void()> callback) {
+
+    auto context = std::make_shared<ClientContext>();
+    auto request = std::make_shared<logic::clearCursorsRequest>();
+    auto response = std::make_shared<logic::clearCursorsResponse>();
+
+    request->set_userid(userid);
+
+    this->Logicstub->async()->clearCursors(context.get(), request.get(), response.get(), 
+    [context, request, response, callback] (grpc::Status s) {
+        if(s.ok()) callback();
+    });
+}
+
+void grpcClient::rpcGetUserRoomListAsync(int32_t userid, std::function<void(std::vector<std::string>)> callback) {
+
+    auto context = std::make_shared<ClientContext>();
+    auto request = std::make_shared<room::GetUserRoomListRequest>();
+    auto response = std::make_shared<room::GetUserRoomListResponse>();
+
+    request->set_userid(userid);
+
+    this->RoomStub->async()->GetUserRoomList(context.get(), request.get(), response.get(), 
+    [request, response, context, callback] (grpc::Status s) {
+        if(s.ok()) {
+            std::vector<std::string> roomlist;
+    
+            for(const auto& roominfo : response->roomlist()) {
+                std::string roomid = roominfo.room_id();
+                std::size_t colon_pos = roomid.find(":");
+                if(colon_pos == std::string::npos) return ;
+
+                std::string real_roomid = roomid.substr(0, colon_pos);
+                roomlist.emplace_back(real_roomid);
+            }
+        
+            callback(roomlist);
+        }
+    });
+    
 }

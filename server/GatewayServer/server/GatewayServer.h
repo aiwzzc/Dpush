@@ -21,7 +21,11 @@ public:
 
     void start();
 
+    static const char* public_key;
+
 private:
+    static constexpr long long MAX_CONN_SIZE = 100000;
+
     std::unique_ptr<HttpServer> HttpServer_;
     std::shared_ptr<grpcClient> grpcClient_;
     std::unique_ptr<GatewayPubSubManager> GatewayPubSubManager_;

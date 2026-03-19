@@ -37,15 +37,20 @@ WebsocketConn::WebsocketConn(const TcpConnectionPtr& conn) : conn_(conn) {}
 
 WebsocketConn::~WebsocketConn() = default;
 
-void WebsocketConn::setUserid(int32_t userid) { this->userid_ = userid; }
+void WebsocketConn::setUserid(int32_t userid) 
+{ this->userid_ = userid; }
 
-void WebsocketConn::setUsername(const std::string& username) { this->username_.assign(username); }
+void WebsocketConn::setUsername(const std::string& username) 
+{ this->username_.assign(username); }
 
-std::string& WebsocketConn::username() { return this->username_; }
+std::string& WebsocketConn::username() 
+{ return this->username_; }
 
-int32_t WebsocketConn::userid() const { return this->userid_; }
+int32_t WebsocketConn::userid() const 
+{ return this->userid_; }
 
-void WebsocketConn::setWebconnCloseCallback(const WebconnCloseCallback& cb) { this->webconnCloseCallback_ = std::move(cb); }
+void WebsocketConn::setWebconnCloseCallback(const WebconnCloseCallback& cb) 
+{ this->webconnCloseCallback_ = std::move(cb); }
 
 void WebsocketConn::sendCloseFrame(uint16_t code, const std::string reason) {
     size_t payload_len = 2 + reason.size();
@@ -100,16 +105,20 @@ void WebsocketConn::disconnect() {
     }
 }
 
-void WebsocketConn::setgrpcClientPtr(grpcClientPtr client) { this->grpcClient_ = client; }
-
 void WebsocketConn::sendPongFrame() {}
-bool WebsocketConn::isCloseFrame() { return true; }
+bool WebsocketConn::isCloseFrame() 
+{ return true; }
 
-void WebsocketConn::send(const std::string& msg) { this->conn_->send(msg); }
-void WebsocketConn::send(const char* msg, std::size_t len) { this->conn_->send(msg, len); }
+void WebsocketConn::send(const std::string& msg) 
+{ this->conn_->send(msg); }
 
-std::string WebsocketConn::onRead(const TcpConnectionPtr& conn, muduo::net::Buffer* buf) {
-    if(conn->disconnected()) return "";
+void WebsocketConn::send(const char* msg, std::size_t len) 
+{ this->conn_->send(msg, len); }
+
+std::vector<std::string> WebsocketConn::onRead(const TcpConnectionPtr& conn, muduo::net::Buffer* buf) {
+    if(conn->disconnected()) return {};
+
+    std::vector<std::string> messageList;
 
     // 使用 while 循环，处理可能存在的多个粘包帧
     while (buf->readableBytes() >= 2) {
@@ -122,13 +131,13 @@ std::string WebsocketConn::onRead(const TcpConnectionPtr& conn, muduo::net::Buff
 
         // 解析扩展长度
         if (payload_length == 126) {
-            if (buf->readableBytes() < 4) return ""; // 半包，等待更多数据
+            if (buf->readableBytes() < 4) return {}; // 半包，等待更多数据
 
             payload_length = (bytes[2] << 8) | bytes[3];
             offset += 2;
 
         } else if (payload_length == 127) {
-            if (buf->readableBytes() < 10) return ""; // 半包，等待更多数据
+            if (buf->readableBytes() < 10) return {}; // 半包，等待更多数据
 
             payload_length = 0;
             for(int i = 0; i < 8; ++i) {
@@ -139,13 +148,13 @@ std::string WebsocketConn::onRead(const TcpConnectionPtr& conn, muduo::net::Buff
 
         // 解析掩码
         if (mask) {
-            if (buf->readableBytes() < offset + 4) return ""; // 半包
+            if (buf->readableBytes() < offset + 4) return {}; // 半包
             offset += 4;
         }
 
         // 检查整个帧的数据是否已经全部到达 TCP 缓冲区
         if (buf->readableBytes() < offset + payload_length) {
-            return ""; // 半包，退出函数，等待 muduo 下一次触发 onRead
+            return {}; // 半包，退出函数，等待 muduo 下一次触发 onRead
         }
 
         // 此时已经收到一个完整的帧，提取 Payload
@@ -162,36 +171,8 @@ std::string WebsocketConn::onRead(const TcpConnectionPtr& conn, muduo::net::Buff
 
         buf->retrieve(offset + payload_length);
 
-        if (opcode == 0x01) { // 文本帧
-            Json::Value root;
-            Json::Reader reader;
+        messageList.emplace_back(payload_data);
 
-            if(reader.parse(payload_data, root) && !root["type"].isNull()) {
-                std::string type = root["type"].asString();
-                if(type == "ClientMessage") {
-                    // handleClientMessage(redis, root);
-                    return payload_data;
-
-                } else if(type == "RequestRoomHistory" || type == "PullMissingMessages") {
-                    std::string message = this->grpcClient_->rpcCilentMessage(payload_data, this->userid_, this->username_);
-
-                    if(!message.empty()) this->send(message);
-
-                    return "";
-
-                } else if(type == "clientCreateRoom") {
-                    // handleClientCreateRoom(pool, root);
-                    return "";
-                }
-            }
-        } else if (opcode == 0x08) {
-            // 处理 Close 帧
-            disconnect();
-            return "";
-        }
-
-        return "";
     }
-
-    return "";
+    return messageList;
 }

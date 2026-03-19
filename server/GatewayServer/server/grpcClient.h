@@ -10,6 +10,7 @@
 #include <memory>
 #include <grpcpp/grpcpp.h>
 #include <vector>
+#include <functional>
 
 using grpc::ClientContext;
 using grpc::ClientReader;
@@ -19,6 +20,17 @@ using grpc::Status;
 
 class HttpRequest;
 class HttpResponse;
+
+struct LogicInfo {
+    int errcode;
+    std::string errmsg;
+    std::string token;
+};
+
+struct RegisterInfo {
+    int errcode;
+    std::string errmsg;
+};
 
 class grpcClient {
 
@@ -40,13 +52,14 @@ public:
     RoomStub(room::RoomServer::NewStub(this->Roomchannel)) {}
     ~grpcClient() = default;
 
-    void rpcLogin(const HttpRequest&, HttpResponse&, int& errcode, std::string& errmsg);
-    void rpcRegister(const HttpRequest&, HttpResponse&, int& errcode, std::string& errmsg);
-    void rpcVerify(const std::string&, int32_t&, std::string& username, int&);
-    std::string rpcinitialPullMessage(const int32_t& userid, const std::string& username, const int messagecount);
-    std::string rpcCilentMessage(const std::string& message, int32_t& userid, const std::string& username);
-    void rpcclearCursors(const int32_t& userid);
-    std::vector<std::string> rpcGetUserRoomList(const int32_t& userid);
+    void rpcLoginAsync(const HttpRequest&, int& errcode, std::string& errmsg, std::function<void(LogicInfo)>);
+    void rpcRegisterAsync(const HttpRequest&, int& errcode, std::string& errmsg, std::function<void(RegisterInfo)>);
+    void rpcinitialPullMessageAsync(int32_t userid, std::string username, const int messagecount,
+    std::function<void(std::string)> callback);
+    void rpcCilentMessageAsync(const std::string& message, int32_t userid, std::string username, 
+    std::function<void(std::string)> callback);
+    void rpcclearCursorsAsync(int32_t userid, std::function<void()>);
+    void rpcGetUserRoomListAsync(int32_t userid, std::function<void(std::vector<std::string>)>);
 
     static std::string api_error_id_to_string(api_error_id id);
     static std::optional<api_error_id> to_api_error_id(int v);

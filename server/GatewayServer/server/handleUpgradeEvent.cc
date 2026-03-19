@@ -4,8 +4,11 @@
 #include "websocketConn.h"
 #include "GatewayPubSubManager.h"
 #include "producer.h"
+#include "GatewayServer.h"
 
 #include <openssl/sha.h>
+#include <jwt.h>
+#include <jsoncpp/json/json.h>
 
 std::string AnalysisCookie(const HttpRequest& req) {
     if(!req.headers().contains("Cookie")) return "";
@@ -47,6 +50,15 @@ std::string HandleUpgradeResponse(const HttpRequest& req) {
     return response;
 }
 
+void sendbadResponse(const TcpConnectionPtr& conn) {
+    std::string rejectRes = "HTTP/1.1 401 Unauthorized\r\n"
+                            "Connection: close\r\n"
+                            "Content-Length: 0\r\n\r\n";
+
+    conn->send(rejectRes);
+    conn->shutdown();
+}
+
 void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const grpcClientPtr& client,
     const kafkaProducerPtr& producer) {
 
@@ -54,46 +66,43 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
 
     if(req.getHeader("Upgrade") == "websocket") {
         std::string cookie = AnalysisCookie(req);
-        std::string email;
-        std::string username;
-        int32_t userid{0};
-        int auth_res{0};
 
-        client->rpcVerify(cookie, userid, username, auth_res);
+        jwt* decoded = nullptr;
 
-        if(cookie.empty() || auth_res < 0) { // 校验失败
-            std::string rejectRes = "HTTP/1.1 401 Unauthorized\r\n"
-                                    "Connection: close\r\n"
-                                    "Content-Length: 0\r\n\r\n";
-            conn->send(rejectRes);
-            conn->shutdown();
+        if(jwt_decode(&decoded, cookie.c_str(), (unsigned char*)GatewayServer::public_key, 
+        strlen(GatewayServer::public_key)) != 0) {
+            sendbadResponse(conn);
 
             return;
         }
 
-        std::string response = HandleUpgradeResponse(req);
-        conn->send(response);
+        conn->send(HandleUpgradeResponse(req));
+        int32_t userid = jwt_get_grant_int(decoded, "userid");
+        const char* uname_ptr = jwt_get_grant(decoded, "username");
+        std::string username = uname_ptr ? uname_ptr : "";
+
+        jwt_free(decoded);
+
+        if(username.empty()) return;
 
         auto wsContextPtr = std::make_shared<WebsocketConn>(conn);
         wsContextPtr->setUserid(userid);
         wsContextPtr->setUsername(username);
-        wsContextPtr->setgrpcClientPtr(client);
 
-        client->rpcclearCursors(userid);
+        client->rpcclearCursorsAsync(userid, [] () { return; });
 
-        std::vector<std::string> roomlist = client->rpcGetUserRoomList(userid);
+        client->rpcGetUserRoomListAsync(userid, [wsContextPtr] (std::vector<std::string> roomlist) {
+            for(const auto& roomid : roomlist) {
+                // 加了mutex
+                GatewayPubSubManager::SubscribeRoomSafe(roomid);
 
-        for(const auto& roomid : roomlist) {
-            // 加了mutex
-            GatewayPubSubManager::SubscribeRoomSafe(roomid);
+                std::lock_guard<std::mutex> lock(GatewayPubSubManager::WebsockConnRoomhashMutex);
+                GatewayPubSubManager::WebsockConnRoomhash[roomid].insert(wsContextPtr);
+            }
+        });
 
-            std::lock_guard<std::mutex> lock(GatewayPubSubManager::WebsockConnRoomhashMutex);
-            GatewayPubSubManager::WebsockConnRoomhash[roomid].insert(wsContextPtr);
-        }
-
-        std::string helloMessage = client->rpcinitialPullMessage(userid, username, 10);
-
-        wsContextPtr->send(helloMessage);
+        client->rpcinitialPullMessageAsync(wsContextPtr->userid(), wsContextPtr->username(), 10, 
+        [wsContextPtr] (std::string msg) { wsContextPtr->send(msg); });
 
         wsContextPtr->setWebconnCloseCallback([wsContextPtr] () {
             if(!wsContextPtr->connected()) return;
@@ -128,27 +137,40 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
             GatewayPubSubManager::WebsockConnhash[userid] = wsContextPtr;
         }
 
-        conn->setMessageCallback([producer] (const TcpConnectionPtr& conn, muduo::net::Buffer* buffer, muduo::Timestamp) {
+        conn->setMessageCallback([producer, client] (const TcpConnectionPtr& conn, muduo::net::Buffer* buffer, muduo::Timestamp) {
             if(conn->disconnected()) return;
-            WebsocketConnPtr* wsContextPtr = std::any_cast<WebsocketConnPtr>(conn->getMutableContext());
+            WebsocketConnPtr wsContextPtr = *(std::any_cast<WebsocketConnPtr>(conn->getMutableContext()));
 
-            std::string data = (*wsContextPtr)->onRead(conn, buffer);
+            std::vector<std::string> messageList = wsContextPtr->onRead(conn, buffer);
 
-            if(!data.empty()) {
+            if(messageList.empty()) return;
+
+            for(auto& message : messageList) {
                 Json::Value root;
                 Json::Reader reader;
 
-                if(reader.parse(data, root)) {
+                if(!reader.parse(message, root)) continue;
+
+                std::string messageType = root["type"].asString();
+
+                if(messageType == "ClientMessage") {
+
                     std::string roomid = root["payload"]["roomId"].asString();
                     std::string clientMessageId = root["clientMessageId"].asString();
 
                     KafkaDeliveryContext* ctx = new KafkaDeliveryContext{conn, clientMessageId};
 
-                    producer->produce("chat_room_messages", data.data(), data.size(), roomid, roomid.size(), ctx, 
-                    (*wsContextPtr)->userid(), (*wsContextPtr)->username());
-                }
-            }
+                    producer->produce("chat_room_messages", message.data(), message.size(), roomid, roomid.size(), ctx, 
+                    wsContextPtr->userid(), wsContextPtr->username());
 
+                } else if(messageType == "RequestRoomHistory" || messageType == "PullMissingMessages") {
+                    client->rpcCilentMessageAsync(message, wsContextPtr->userid(), wsContextPtr->username(), 
+                    [wsContextPtr] (std::string msg) {
+                        wsContextPtr->send(msg);
+                    });
+
+                } else { return; }
+            }
         });
 
     }

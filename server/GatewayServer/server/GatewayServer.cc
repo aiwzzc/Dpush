@@ -1,6 +1,30 @@
 #include "GatewayServer.h"
 #include "producer.h"
 
+static char* read_file(const char* filename) {
+    FILE* f = fopen(filename, "rb");
+    if (!f) {
+        perror("fopen");
+        return NULL;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    rewind(f);
+
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) {
+        fclose(f);
+        return NULL;
+    }
+
+    fread(buf, 1, len, f);
+    buf[len] = '\0';  // 一定要加
+
+    fclose(f);
+    return buf;
+}
+
 GatewayServer::GatewayServer() : HttpServer_(std::make_unique<HttpServer>(muduo::net::InetAddress{"0.0.0.0", 5005}, "HttpServer", 6)), 
 grpcClient_(std::make_shared<grpcClient>()),
 GatewayPubSubManager_(std::make_unique<GatewayPubSubManager>()), kafkaProducer_(std::make_shared<kafkaProducer>()) {
@@ -12,6 +36,9 @@ GatewayPubSubManager_(std::make_unique<GatewayPubSubManager>()), kafkaProducer_(
         handleUpgradeEvent(conn, req, this->grpcClient_, this->kafkaProducer_);
     });
 }
+
+const char* GatewayServer::public_key = read_file("../base/public.pem");
+
 GatewayServer::~GatewayServer() {
     if(this->poolthread_.joinable()) this->poolthread_.join();
 }

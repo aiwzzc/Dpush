@@ -52,4 +52,6 @@ private:
 
     MySQLConnPool* mysql_pool_;
     sw::redis::Redis* redis_pool_;
+
+    const char* private_key;
 };

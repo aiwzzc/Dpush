@@ -2,14 +2,12 @@
 
 #include "muduo/net/TcpConnection.h"
 #include "../../base/types.h"
-#include "grpcClient.h"
 
 #include <string>
 #include <functional>
 #include <memory>
 #include <unordered_map>
 #include <sw/redis++/redis++.h>
-#include <jsoncpp/json/json.h>
 
 class HttpRequest;
 
@@ -34,11 +32,10 @@ public:
     WebsocketConn(const TcpConnectionPtr&);
     ~WebsocketConn();
 
-    std::string onRead(const TcpConnectionPtr& conn, muduo::net::Buffer* buf);
+    std::vector<std::string> onRead(const TcpConnectionPtr& conn, muduo::net::Buffer* buf);
     void setUserid(int32_t userid);
     void setUsername(const std::string&);
     void setWebconnCloseCallback(const WebconnCloseCallback& cb);
-    void setgrpcClientPtr(grpcClientPtr);
 
     void send(const std::string&);
     void send(const char*, std::size_t);
@@ -58,7 +55,6 @@ private:
     int32_t userid_;
     std::string username_;
     WebconnCloseCallback webconnCloseCallback_;
-    grpcClientPtr grpcClient_;
 };
 
 using WebsocketConnPtr = std::shared_ptr<WebsocketConn>;
