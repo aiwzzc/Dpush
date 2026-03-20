@@ -14,8 +14,8 @@ LogicServer::LogicServer() {
 
     this->redisPool_ = std::make_unique<sw::redis::Redis>(connection_options, pool_options);
 
-    this->ComputeThreadPool_ = std::make_unique<ComputeThreadPool>(3);
-    this->OrderedThreadPool_ = std::make_unique<OrderedThreadPool>(3);
+    this->ComputeThreadPool_ = std::make_unique<ComputeThreadPool>(6);
+    this->OrderedThreadPool_ = std::make_unique<OrderedThreadPool>(6);
 
     this->LogicGrpcService_ = std::make_unique<LogicGrpcServer>(this->MySQLConnPool_.get(), 
     this->redisPool_.get(), this->ComputeThreadPool_.get());

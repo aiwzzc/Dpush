@@ -1,6 +1,7 @@
 #pragma once
 
 #include "muduo/net/TcpConnection.h"
+#include "muduo/net/EventLoop.h"
 #include "../../base/types.h"
 
 #include <string>
@@ -12,6 +13,7 @@
 class HttpRequest;
 
 using muduo::net::TcpConnectionPtr;
+using muduo::net::EventLoop;
 
 struct WebSocketFrame {
     bool fin;
@@ -36,17 +38,21 @@ public:
     void setUserid(int32_t userid);
     void setUsername(const std::string&);
     void setWebconnCloseCallback(const WebconnCloseCallback& cb);
+    void setjoinedRooms(const std::unordered_set<std::string>& rooms);
 
     void send(const std::string&);
     void send(const char*, std::size_t);
     void sendPongFrame();
     void sendCloseFrame(uint16_t code, const std::string reason);
+    void addRoom(const std::string& roomid);
 
     bool connected();
     void disconnect();
 
+    EventLoop* getLoop() const;
     std::string& username();
     int32_t userid() const;
+    std::unordered_set<std::string> getjoinedRooms() const;
 
 private:
     bool isCloseFrame();
@@ -55,6 +61,8 @@ private:
     int32_t userid_;
     std::string username_;
     WebconnCloseCallback webconnCloseCallback_;
+
+    std::unordered_set<std::string> joinedRooms_;
 };
 
 using WebsocketConnPtr = std::shared_ptr<WebsocketConn>;

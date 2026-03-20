@@ -5,6 +5,8 @@
 #include "muduo/net/EventLoop.h"
 #include "muduo/net/TcpConnection.h"
 
+#include "../GatewayPubSubManager.h"
+
 HttpServer::HttpServer(const muduo::net::InetAddress &addr, const std::string& name, int num_event_loops):
     loop_(std::make_unique<EventLoop>()), 
     server_(std::make_unique<TcpServer>(this->loop_.get(), addr, name)) {
@@ -16,6 +18,10 @@ HttpServer::HttpServer(const muduo::net::InetAddress &addr, const std::string& n
     setHttpCallback([this] (const TcpConnectionPtr& conn, const HttpRequest& req) { defaultHttpCallback(conn, req); });
 
     this->server_->setThreadNum(num_event_loops);
+
+    this->server_->setThreadInitCallback([] (EventLoop* loop) {
+        GatewayPubSubManager::RegisterLoop(loop);
+    });
 }
 
 HttpServer::~HttpServer() = default;

@@ -92,13 +92,46 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
         client->rpcclearCursorsAsync(userid, [] () { return; });
 
         client->rpcGetUserRoomListAsync(userid, [wsContextPtr] (std::vector<std::string> roomlist) {
-            for(const auto& roomid : roomlist) {
-                // 加了mutex
-                GatewayPubSubManager::SubscribeRoomSafe(roomid);
 
-                std::lock_guard<std::mutex> lock(GatewayPubSubManager::WebsockConnRoomhashMutex);
-                GatewayPubSubManager::WebsockConnRoomhash[roomid].insert(wsContextPtr);
+#if 0
+            for(const auto& roomid : roomlist) {
+
+                bool needSubscribeToRedisPub = false;
+
+                {
+                    std::size_t bucketIndex = std::hash<std::string>{}(roomid) % BUCKET_NUM;
+                    auto& bucket = GatewayPubSubManager::roomBuckets[bucketIndex];
+
+                    std::lock_guard<std::mutex> lock(bucket.mtx_);
+
+                    auto& conns = bucket.roomHash_[roomid];
+                    if(conns.empty()) needSubscribeToRedisPub = true;
+
+                    conns.insert(wsContextPtr);
+                }
+
+                if(needSubscribeToRedisPub) GatewayPubSubManager::SubscribeRoomSafe(roomid);
+
             }
+#elif 1
+            EventLoop* loop = wsContextPtr->getLoop();
+
+            loop->runInLoop([wsContextPtr, roomlist = std::move(roomlist)] () {
+                for(const auto& roomid : roomlist) {
+                    bool needSubscribeToRedisPub = false;
+
+                    auto& conns = LocalWebsockConnRoomhash[roomid];
+                    if(conns.empty()) needSubscribeToRedisPub = true;
+
+                    LocalWebsockConnRoomhash[roomid].insert(wsContextPtr);
+                    if(needSubscribeToRedisPub) GatewayPubSubManager::SubscribeRoomSafe(roomid);
+
+                    wsContextPtr->addRoom(roomid);
+                }
+            });
+            
+#endif
+    
         });
 
         client->rpcinitialPullMessageAsync(wsContextPtr->userid(), wsContextPtr->username(), 10, 
@@ -109,6 +142,7 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
 
             int32_t userid = wsContextPtr->userid();
 
+#if 0
             {
                 std::lock_guard<std::mutex> lock(GatewayPubSubManager::WebsockConnhashMutex);
                 if(GatewayPubSubManager::WebsockConnhash.contains(userid) && 
@@ -118,24 +152,54 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
                 // 还需要去redis删除对应的路由表(分布式)
             }
 
-            {
-                std::lock_guard<std::mutex> lock(GatewayPubSubManager::WebsockConnRoomhashMutex);
-                for(auto it = GatewayPubSubManager::WebsockConnRoomhash.begin(); 
-                    it != GatewayPubSubManager::WebsockConnRoomhash.end(); ++it) {
-                    
-                    std::unordered_set<WebsocketConnPtr>& conns = it->second;
-                    if(conns.find(wsContextPtr) != conns.end()) conns.erase(wsContextPtr);
+            for(auto& bucket : GatewayPubSubManager::roomBuckets) {
+                {
+                    std::lock_guard<std::mutex> lock(bucket.mtx_);
+                    for(auto it = bucket.roomHash_.begin(); it != bucket.roomHash_.end(); ++it) {
+                        auto conn = it->second.find(wsContextPtr);
+
+                        if(conn != it->second.end()) it->second.erase(wsContextPtr);
+                    }
                 }
             }
+#elif 1
+            EventLoop* loop = wsContextPtr->getLoop();
 
+            loop->runInLoop([userid, wsContextPtr] () {
+                if(LocalWebsockConnhash.contains(userid) && LocalWebsockConnhash[userid] == wsContextPtr) {
+                    LocalWebsockConnhash.erase(userid);
+                }
+
+                std::unordered_set<std::string> myRooms = wsContextPtr->getjoinedRooms();
+                for(const auto& roomid : myRooms) {
+                    auto it = LocalWebsockConnRoomhash.find(roomid);
+
+                    if(it != LocalWebsockConnRoomhash.end()) {
+                        it->second.erase(wsContextPtr);
+
+                        if(it->second.empty()) {
+                            LocalWebsockConnRoomhash.erase(it);
+                            GatewayPubSubManager::UnSubscribeRoomSafe(roomid);
+                        }
+                    }
+                }
+            });
+#endif
         });
 
         conn->setContext(wsContextPtr);
 
+#if 0
         {
             std::lock_guard<std::mutex> lock(GatewayPubSubManager::WebsockConnhashMutex);
             GatewayPubSubManager::WebsockConnhash[userid] = wsContextPtr;
         }
+#elif 1
+        EventLoop* loop = wsContextPtr->getLoop();
+        loop->runInLoop([userid, wsContextPtr] () {
+            LocalWebsockConnhash[userid] = wsContextPtr;
+        });
+#endif
 
         conn->setMessageCallback([producer, client] (const TcpConnectionPtr& conn, muduo::net::Buffer* buffer, muduo::Timestamp) {
             if(conn->disconnected()) return;

@@ -72,6 +72,9 @@ void grpcClient::rpcLoginAsync(const HttpRequest& req, int& errcode, std::string
 
     request->set_email(root["email"].asString());
     request->set_password(root["password"].asString());
+
+    auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
+    context->set_deadline(deadline);
     
     this->Authstub->async()->Login(context.get(), request.get(), response.get(), 
     [request, response, context, callback] (grpc::Status s) {
@@ -110,6 +113,9 @@ void grpcClient::rpcRegisterAsync(const HttpRequest& req, int& errcode, std::str
     request->set_email(root["email"].asString());
     request->set_password(root["password"].asString());
 
+    auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
+    context->set_deadline(deadline);
+
     this->Authstub->async()->Register(context.get(), request.get(), response.get(), 
     [request, response, context, callback] (grpc::Status s) {
         if(s.ok()) {
@@ -129,6 +135,9 @@ void grpcClient::rpcinitialPullMessageAsync(int32_t userid, std::string username
     request->set_userid(userid);
     request->set_username(std::move(username));
     request->set_messagecount(messagecount);
+
+    auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
+    context->set_deadline(deadline);
 
     this->Logicstub->async()->initialPullMessage(context.get(), request.get(), response.get(),
     [request, response, context, callback] (grpc::Status s) {
@@ -175,6 +184,9 @@ void grpcClient::rpcclearCursorsAsync(int32_t userid, std::function<void()> call
 
     request->set_userid(userid);
 
+    auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
+    context->set_deadline(deadline);
+
     this->Logicstub->async()->clearCursors(context.get(), request.get(), response.get(), 
     [context, request, response, callback] (grpc::Status s) {
         if(s.ok()) callback();
@@ -188,6 +200,9 @@ void grpcClient::rpcGetUserRoomListAsync(int32_t userid, std::function<void(std:
     auto response = std::make_shared<room::GetUserRoomListResponse>();
 
     request->set_userid(userid);
+
+    auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
+    context->set_deadline(deadline);
 
     this->RoomStub->async()->GetUserRoomList(context.get(), request.get(), response.get(), 
     [request, response, context, callback] (grpc::Status s) {
