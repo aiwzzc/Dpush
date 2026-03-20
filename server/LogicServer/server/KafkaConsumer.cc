@@ -4,6 +4,7 @@
 
 #include "../base/coroutineTask.h"
 #include "../base/typeCommon.h"
+#include "../../base/JsonView.h"
 
 KafkaConsumer::KafkaConsumer(const std::string& brokers, const std::string& group_id, 
     std::vector<std::string> topics, OrderedThreadPool* ordthreadpool, 
@@ -189,16 +190,6 @@ static std::string buildWebSocketFrame(const std::string& payload, uint8_t opcod
 
     return frame;
 }
-
-/*
-{
-  "type": "PullMissingMessages",
-  "payload": {
-    "roomId": "beast",
-    "missingMessageIds": [11, 12]
-  }
-}
-*/
 
 std::string fillserverjson(ComputeThreadPool* threadpool, std::vector<std::pair<Message, long long>>& messages_, 
     const std::string& clientMessageId, std::string& roomid) {

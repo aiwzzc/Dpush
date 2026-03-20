@@ -18,6 +18,8 @@ std::mutex GatewayPubSubManager::channel_mtx_{};
 std::vector<EventLoop*> GatewayPubSubManager::all_io_loops_{};
 std::mutex GatewayPubSubManager::loops_mtx_{};
 
+LRUCache<int32_t, std::vector<std::string>> GatewayPubSubManager::UserRoomLRU_{10000};
+
 GatewayPubSubManager::GatewayPubSubManager() {
     sw::redis::ConnectionOptions opts;
     opts.host = "127.0.0.1";
@@ -74,6 +76,7 @@ void GatewayPubSubManager::RegisterLoop(EventLoop* loop) {
     GatewayPubSubManager::all_io_loops_.push_back(loop);
 }
 
+// 幂等性设计
 void GatewayPubSubManager::SubscribeRoomSafe(const std::string& roomid) {
     std::lock_guard<std::mutex> lock(GatewayPubSubManager::channel_mtx_);
     

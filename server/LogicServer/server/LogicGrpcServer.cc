@@ -603,6 +603,16 @@ grpc::ServerUnaryReactor* LogicGrpcServer::clientMessage(grpc::CallbackServerCon
     return reactor;
 }
 
+/*
+{
+  "type": "PullMissingMessages",
+  "payload": {
+    "roomId": "beast",
+    "missingMessageIds": [11, 12]
+  }
+}
+*/
+
 DetachedTask LogicGrpcServer::DoclientMessage(grpc::ServerUnaryReactor* reactor, const logic::clientMessageRequest* request, 
     logic::clientMessageResponse* response) {
 

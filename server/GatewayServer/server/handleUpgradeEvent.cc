@@ -6,9 +6,10 @@
 #include "producer.h"
 #include "GatewayServer.h"
 
+#include "../../base/JsonView.h"
+
 #include <openssl/sha.h>
 #include <jwt.h>
-#include <jsoncpp/json/json.h>
 
 std::string AnalysisCookie(const HttpRequest& req) {
     if(!req.headers().contains("Cookie")) return "";
@@ -91,33 +92,13 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
 
         client->rpcclearCursorsAsync(userid, [] () { return; });
 
-        client->rpcGetUserRoomListAsync(userid, [wsContextPtr] (std::vector<std::string> roomlist) {
+        auto roomlist = GatewayPubSubManager::UserRoomLRU_.get(userid);
 
-#if 0
-            for(const auto& roomid : roomlist) {
-
-                bool needSubscribeToRedisPub = false;
-
-                {
-                    std::size_t bucketIndex = std::hash<std::string>{}(roomid) % BUCKET_NUM;
-                    auto& bucket = GatewayPubSubManager::roomBuckets[bucketIndex];
-
-                    std::lock_guard<std::mutex> lock(bucket.mtx_);
-
-                    auto& conns = bucket.roomHash_[roomid];
-                    if(conns.empty()) needSubscribeToRedisPub = true;
-
-                    conns.insert(wsContextPtr);
-                }
-
-                if(needSubscribeToRedisPub) GatewayPubSubManager::SubscribeRoomSafe(roomid);
-
-            }
-#elif 1
+        if(roomlist) {
             EventLoop* loop = wsContextPtr->getLoop();
 
             loop->runInLoop([wsContextPtr, roomlist = std::move(roomlist)] () {
-                for(const auto& roomid : roomlist) {
+                for(const auto& roomid : roomlist.value()) {
                     bool needSubscribeToRedisPub = false;
 
                     auto& conns = LocalWebsockConnRoomhash[roomid];
@@ -129,10 +110,53 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
                     wsContextPtr->addRoom(roomid);
                 }
             });
-            
+
+        } else {
+
+            client->rpcGetUserRoomListAsync(userid, [userid, wsContextPtr] (std::vector<std::string> roomlist) {
+
+                GatewayPubSubManager::UserRoomLRU_.put(userid, roomlist);
+
+#if 0
+                for(const auto& roomid : roomlist) {
+
+                    bool needSubscribeToRedisPub = false;
+
+                    {
+                        std::size_t bucketIndex = std::hash<std::string>{}(roomid) % BUCKET_NUM;
+                        auto& bucket = GatewayPubSubManager::roomBuckets[bucketIndex];
+
+                        std::lock_guard<std::mutex> lock(bucket.mtx_);
+
+                        auto& conns = bucket.roomHash_[roomid];
+                        if(conns.empty()) needSubscribeToRedisPub = true;
+
+                        conns.insert(wsContextPtr);
+                    }
+
+                    if(needSubscribeToRedisPub) GatewayPubSubManager::SubscribeRoomSafe(roomid);
+
+                }
+#elif 1
+                EventLoop* loop = wsContextPtr->getLoop();
+
+                loop->runInLoop([wsContextPtr, roomlist = std::move(roomlist)] () {
+                    for(const auto& roomid : roomlist) {
+                        bool needSubscribeToRedisPub = false;
+
+                        auto& conns = LocalWebsockConnRoomhash[roomid];
+                        if(conns.empty()) needSubscribeToRedisPub = true;
+
+                        LocalWebsockConnRoomhash[roomid].insert(wsContextPtr);
+                        if(needSubscribeToRedisPub) GatewayPubSubManager::SubscribeRoomSafe(roomid);
+
+                        wsContextPtr->addRoom(roomid);
+                    }
+                });
 #endif
     
-        });
+            });
+        }
 
         client->rpcinitialPullMessageAsync(wsContextPtr->userid(), wsContextPtr->username(), 10, 
         [wsContextPtr] (std::string msg) { wsContextPtr->send(msg); });
@@ -210,17 +234,17 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
             if(messageList.empty()) return;
 
             for(auto& message : messageList) {
-                Json::Value root;
-                Json::Reader reader;
 
-                if(!reader.parse(message, root)) continue;
+                JsonDoc root;
 
-                std::string messageType = root["type"].asString();
+                if(!root.parse(message.c_str(), message.size())) continue;
+
+                std::string messageType = root.root()["type"].asString();
 
                 if(messageType == "ClientMessage") {
 
-                    std::string roomid = root["payload"]["roomId"].asString();
-                    std::string clientMessageId = root["clientMessageId"].asString();
+                    std::string roomid = root.root()["payload"]["roomId"].asString();
+                    std::string clientMessageId = root.root()["clientMessageId"].asString();
 
                     KafkaDeliveryContext* ctx = new KafkaDeliveryContext{conn, clientMessageId};
 

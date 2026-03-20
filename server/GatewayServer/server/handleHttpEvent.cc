@@ -2,13 +2,13 @@
 
 #include "httpServer/HttpRequest.h"
 #include "httpServer/HttpResponse.h"
+#include "../../base/JsonView.h"
 
 #include <string>
 #include <iostream>
 
 #include <fstream>
 #include <sstream>
-#include <jsoncpp/json/json.h>
  
 // 读取文件内容
 std::string readFile(const std::string& filePath) {
@@ -34,11 +34,14 @@ std::string GetMimeType(const std::string& path) {
 }
 
 void encodeLoginJson(grpcClient::api_error_id id, const std::string& message, std::string& resp_json) {
-    Json::Value root;
-    root["id"] = grpcClient::api_error_id_to_string(id);
-    root["message"] = message;
-    Json::FastWriter writer;
-    resp_json = writer.write(root);
+    // Json::Value root;
+    JsonDoc root;
+    root.root()["id"].set(grpcClient::api_error_id_to_string(id));
+    root.root()["message"].set(message);
+    // root["id"] = grpcClient::api_error_id_to_string(id);
+    // root["message"] = message;
+    // Json::FastWriter writer;
+    resp_json = root.toString();
 }
 
 void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const grpcClientPtr& client) {

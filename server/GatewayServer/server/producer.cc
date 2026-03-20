@@ -1,5 +1,5 @@
 #include "producer.h"
-#include <jsoncpp/json/json.h>
+#include "../../base/JsonView.h"
 
 kafkaProducer::kafkaProducer() : my_dr_cb_(std::make_unique<MyDeliveryReportCb>()) { this->init_kafka(); }
 kafkaProducer::~kafkaProducer() = default;
@@ -39,16 +39,14 @@ static std::string buildWebSocketFrame(const std::string& payload, uint8_t opcod
 }
 
 std::string packet_ack(const std::string& msg_id, const std::string& status) {
-    Json::Value root;
-    Json::Value payload;
-    Json::FastWriter writer;
+    JsonDoc root;
 
-    root["type"] = "MessageAck";
-    payload["clientMessageId"] = msg_id;
-    payload["status"] = status;
-    root["payload"] = payload;
+    root.root()["type"].set("MessageAck");
+    auto payload = root.root()["payload"];
+    payload["clientMessageId"].set(msg_id);
+    payload["status"].set(status);
 
-    return buildWebSocketFrame(writer.write(root));
+    return buildWebSocketFrame(root.toString());
 }
 
 class MyDeliveryReportCb : public RdKafka::DeliveryReportCb {

@@ -3,21 +3,28 @@
 HttpResponse::HttpResponse(bool close) : statusCode_(HttpResponse::HttpStatusCode::kUnknown), closeConnection_(close) {}
 HttpResponse::~HttpResponse() = default;
 
-void HttpResponse::setStatusCode(HttpStatusCode code) { this->statusCode_ = code; }
+void HttpResponse::setStatusCode(HttpStatusCode code) 
+{ this->statusCode_ = code; }
 
-void HttpResponse::setStatusMessage(const std::string& statusMessage) { this->statusMessage_.assign(statusMessage); }
+void HttpResponse::setStatusMessage(const std::string& statusMessage) 
+{ this->statusMessage_.assign(statusMessage); }
 
 void HttpResponse::setCloseConnection(bool on) { this->closeConnection_ = on; }
 
-void HttpResponse::setContentType(const std::string& contentType) { this->addHeader("Content-Type", contentType); }
+void HttpResponse::setContentType(const std::string& contentType) 
+{ this->addHeader("Content-Type", contentType); }
 
-void HttpResponse::setCookie(const std::string& cookie) { this->cookie_.assign(cookie); }
+void HttpResponse::setCookie(const std::string& cookie) 
+{ this->cookie_.assign(cookie); }
 
-bool HttpResponse::closeConnection() const { return this->closeConnection_; }
+bool HttpResponse::closeConnection() const 
+{ return this->closeConnection_; }
 
-void HttpResponse::addHeader(const std::string& key, const std::string& value) { this->headers_[key] = value; }
+void HttpResponse::addHeader(const std::string& key, const std::string& value) 
+{ this->headers_[key] = value; }
 
-void HttpResponse::setBody(const std::string& body) { this->body_.assign(body); }
+void HttpResponse::setBody(const std::string& body) 
+{ this->body_.assign(body); }
 
 void HttpResponse::appendToBuffer(std::string& output) const {
     output.append("HTTP/1.1 ");

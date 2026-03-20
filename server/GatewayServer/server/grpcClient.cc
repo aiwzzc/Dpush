@@ -3,7 +3,7 @@
 #include "httpServer/HttpResponse.h"
 #include "httpServer/HttpRequest.h"
 
-#include <jsoncpp/json/json.h>
+#include "../../base/JsonView.h"
 
 std::string grpcClient::api_error_id_to_string(api_error_id id) {
     std::string res;
@@ -54,24 +54,23 @@ void grpcClient::rpcLoginAsync(const HttpRequest& req, int& errcode, std::string
     auto request = std::make_shared<auth::LoginRequest>();
     auto response = std::make_shared<auth::LoginResponse>();
 
-    Json::Value root;
-    Json::Reader reader;
+    JsonDoc root;
 
-    if (!reader.parse(req.body(), root)) {
+    if (!root.parse(req.body().c_str(), req.body().size())) {
         errcode = -6;
         errmsg.assign("JSON格式错误");
         return;
     }
 
-    if (!root.isMember("email")    || !root["email"].isString() ||
-        !root.isMember("password") || !root["password"].isString()) {
+    if (!root.root().isMember("email")    || !root.root()["email"].isString() ||
+        !root.root().isMember("password") || !root.root()["password"].isString()) {
         errcode = -6;
         errmsg.assign("请求参数不全");
         return;
     }
 
-    request->set_email(root["email"].asString());
-    request->set_password(root["password"].asString());
+    request->set_email(root.root()["email"].asString());
+    request->set_password(root.root()["password"].asString());
 
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
     context->set_deadline(deadline);
@@ -92,26 +91,25 @@ void grpcClient::rpcRegisterAsync(const HttpRequest& req, int& errcode, std::str
     auto request = std::make_shared<auth::RegisterRequest>();
     auto response = std::make_shared<auth::RegisterResponse>();
 
-    Json::Value root;
-    Json::Reader reader;
+    JsonDoc root;
 
-    if (!reader.parse(req.body(), root)) {
+    if (!root.parse(req.body().c_str(), req.body().size())) {
         errcode = -6;
         errmsg.assign("JSON格式错误");
         return;
     }
 
-    if (!root.isMember("username") || !root["username"].isString() ||
-        !root.isMember("email")    || !root["email"].isString() ||
-        !root.isMember("password") || !root["password"].isString()) {
+    if (!root.root().isMember("username") || !root.root()["username"].isString() ||
+        !root.root().isMember("email")    || !root.root()["email"].isString() ||
+        !root.root().isMember("password") || !root.root()["password"].isString()) {
         errcode = -6;
         errmsg.assign("请求参数不全");
         return;
     }
 
-    request->set_username(root["username"].asString());
-    request->set_email(root["email"].asString());
-    request->set_password(root["password"].asString());
+    request->set_username(root.root()["username"].asString());
+    request->set_email(root.root()["email"].asString());
+    request->set_password(root.root()["password"].asString());
 
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
     context->set_deadline(deadline);
