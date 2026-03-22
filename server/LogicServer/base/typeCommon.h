@@ -42,3 +42,9 @@ struct MessageBatch
     // true if there are more messages that could be loaded
     bool has_more{};
 };
+
+struct RoomDataCache {
+    std::string room_id;
+    std::string room_name;
+    MessageBatch msgs;
+};

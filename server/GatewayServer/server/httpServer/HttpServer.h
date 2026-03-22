@@ -8,6 +8,7 @@
 #include <memory>
 #include <cstring>
 #include <functional>
+#include <unordered_map>
 
 #define HTTP_RESPONSE_JSON_MAX 4096
 #define HTTP_RESPONSE_JSON                                                     \
@@ -62,6 +63,8 @@ public:
 
     HttpServer(const muduo::net::InetAddress &addr, const std::string& name, int num_event_loops);
     ~HttpServer();
+
+    static std::unordered_map<std::string, std::string> StaticFilesHash;
 
     void start();
     void setHttpCallback(const HttpCallback& cb);

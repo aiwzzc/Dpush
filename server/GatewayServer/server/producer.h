@@ -22,7 +22,7 @@ public:
     kafkaProducer();
     ~kafkaProducer();
 
-    RdKafka::ErrorCode produce(const std::string& topic, char* data, std::size_t data_len, 
+    RdKafka::ErrorCode produce(const std::string& topic, const char* data, std::size_t data_len, 
     const std::string& key, std::size_t key_len, void* ctx, int32_t userid, std::string& username);
 
     void poll(int timeout = 0);

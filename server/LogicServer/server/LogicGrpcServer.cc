@@ -3,6 +3,7 @@
 #include "../../proto/room.grpc.pb.h"
 #include "../../proto/room.pb.h"
 #include "../base/typeCommon.h"
+#include "../../flatbuffers/chat_generated.h"
 
 #include <memory>
 #include <jsoncpp/json/json.h>
@@ -510,47 +511,10 @@ const MessageBatch& messages) {
     return MakeRequestMessageAwaiter{threadpool, root, roomname, messages, ""};
 }
 
-void fillRoomJson(const MessageBatch& message_batch, Json::Value& room, const std::string& roomid, const std::string& roomname) {
-    room["id"] = roomid;
-    room["name"] = roomname;
-    room["hasMoreMessage"] = message_batch.has_more;
-
-    Json::Value messages;
-    for(int j = 0; j < message_batch.messages.size(); j++) {
-        Json::Value  message;
-        Json::Value user;
-        message["id"] = message_batch.messages[j].id;
-        message["content"] = message_batch.messages[j].content;   
-        user["id"] = message_batch.messages[j].user_id;
-        user["username"] = message_batch.messages[j].username;
-        message["user"] = user;
-        message["timestamp"] = (Json::UInt64)message_batch.messages[j].timestamp;
-        messages[j] = message;
-    }
-
-    if(message_batch.messages.size() > 0)
-        room["messages"] = messages;
-    else 
-        room["messages"] = Json::arrayValue;  //不能为NULL，否则前端报异常
-}
-
 DetachedTask LogicGrpcServer::DoinitialPullMessage(grpc::ServerUnaryReactor* reatcor, const logic::pullMessageRequest* request, 
     logic::pullMessageResponse* response) {
 
-    std::string userid = std::to_string(request->userid());
-
-    Json::Value root;
-    Json::Value payload;
-    Json::Value me;
-
-    root["type"] = "hello";
-
-    me["id"] = userid;
-    me["username"] = request->username();
-    payload["me"] = me;
-
-    Json::Value rooms;
-    int it_index = 0;
+    std::string_view userid = std::to_string(request->userid());
 
     std::unordered_map<std::string, std::string> roomlist;
 
@@ -562,23 +526,85 @@ DetachedTask LogicGrpcServer::DoinitialPullMessage(grpc::ServerUnaryReactor* rea
     }
 
     std::unordered_map<std::string, std::string> cursors = co_await async_GetUserCursors_for_coro(this->thread_pool_,
-    this->redis_pool_, userid);
+    this->redis_pool_, userid.data());
+
+    std::vector<RoomDataCache> all_room_data;
 
     for(auto it = roomlist.begin(); it != roomlist.end(); ++it) {
         MessageBatch msgs = co_await async_GerHistoryMessage_for_coro(this->thread_pool_, this->redis_pool_,
-        userid, it->first, cursors, request->messagecount());
+        userid.data(), it->first, cursors, request->messagecount());
 
-        Json::Value room;
-        fillRoomJson(msgs, room, it->first, it->second);
-        rooms[it_index++] = room;
+        all_room_data.emplace_back(it->first, it->second, msgs);
     }
 
-    payload["rooms"] = rooms;
-    root["payload"] = payload;
-    Json::FastWriter writer;
-    std::string str_json = writer.write(root);
-    
-    response->set_message(buildWebSocketFrame(str_json));
+    thread_local flatbuffers::FlatBufferBuilder builder(4096);
+    builder.Clear();
+
+    std::vector<flatbuffers::Offset<ChatApp::RoomItem>> roomItemOffsets;
+
+    for(auto& room_data : all_room_data) {
+        std::vector<flatbuffers::Offset<ChatApp::RoomMessageItem>> messageItem;
+
+        for(auto& message : room_data.msgs.messages) {
+            auto username = builder.CreateString(message.username);
+            auto content_str = builder.CreateString(message.content);
+            auto messageid_str = builder.CreateString(message.id);
+
+            ChatApp::UserBuilder UserBuilder(builder);
+            UserBuilder.add_userid(message.user_id);
+            UserBuilder.add_username(username);
+            auto Useroffset = UserBuilder.Finish();
+
+            ChatApp::RoomMessageItemBuilder RoomMessageBuilder(builder);
+            RoomMessageBuilder.add_user(Useroffset);
+            RoomMessageBuilder.add_content(content_str);
+            RoomMessageBuilder.add_id(messageid_str);
+            RoomMessageBuilder.add_timestamp(message.timestamp);
+            auto roomMsgOffset = RoomMessageBuilder.Finish();
+
+            messageItem.push_back(roomMsgOffset);
+        }
+
+        auto messages_vector = builder.CreateVector(messageItem);
+        auto roomid = builder.CreateString(room_data.room_id);
+        auto roomname = builder.CreateString(room_data.room_name);
+
+        ChatApp::RoomItemBuilder RoomItemBuilder(builder);
+        RoomItemBuilder.add_room_id(roomid);
+        RoomItemBuilder.add_roomname(roomname);
+        RoomItemBuilder.add_has_more_messages(room_data.msgs.has_more);
+        RoomItemBuilder.add_messages(messages_vector);
+        auto roomItemOffset = RoomItemBuilder.Finish();
+
+        roomItemOffsets.push_back(roomItemOffset);
+    }
+
+    auto rooms_vector = builder.CreateVector(roomItemOffsets);
+    auto my_username_str = builder.CreateString(request->username());
+
+    ChatApp::UserBuilder meBuilder(builder);
+    meBuilder.add_userid(request->userid());
+    meBuilder.add_username(my_username_str);
+
+    auto meOffset = meBuilder.Finish();
+
+    ChatApp::HelloMessagePayloadBuilder helloPayloadBuilder(builder);
+    helloPayloadBuilder.add_me(meOffset);
+    helloPayloadBuilder.add_rooms(rooms_vector);
+
+    auto helloPayloadOffset = helloPayloadBuilder.Finish();
+
+    ChatApp::RootMessageBuilder rootBuilder(builder);
+    rootBuilder.add_payload_type(ChatApp::AnyPayload_HelloMessagePayload);
+    rootBuilder.add_payload(helloPayloadOffset.Union());
+    auto rootMsgOffset = rootBuilder.Finish();
+
+    builder.Finish(rootMsgOffset);
+
+    uint8_t* data = builder.GetBufferPointer();
+    int size = builder.GetSize();
+
+    response->set_message(buildWebSocketFrame(std::string(reinterpret_cast<const char*>(data), size), 0x02));
 
     reatcor->Finish(grpc::Status::OK);
 }
@@ -602,16 +628,6 @@ grpc::ServerUnaryReactor* LogicGrpcServer::clientMessage(grpc::CallbackServerCon
 
     return reactor;
 }
-
-/*
-{
-  "type": "PullMissingMessages",
-  "payload": {
-    "roomId": "beast",
-    "missingMessageIds": [11, 12]
-  }
-}
-*/
 
 DetachedTask LogicGrpcServer::DoclientMessage(grpc::ServerUnaryReactor* reactor, const logic::clientMessageRequest* request, 
     logic::clientMessageResponse* response) {

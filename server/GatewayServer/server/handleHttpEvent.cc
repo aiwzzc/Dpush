@@ -2,6 +2,7 @@
 
 #include "httpServer/HttpRequest.h"
 #include "httpServer/HttpResponse.h"
+#include "httpServer/HttpServer.h"
 #include "../../base/JsonView.h"
 
 #include <string>
@@ -9,17 +10,6 @@
 
 #include <fstream>
 #include <sstream>
- 
-// 读取文件内容
-std::string readFile(const std::string& filePath) {
-    std::ifstream file(filePath);
-    if (!file) {
-        return "";
-    }
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    return buffer.str();
-}
 
 // 根据文件后缀名推断 MIME 类型
 std::string GetMimeType(const std::string& path) {
@@ -34,13 +24,9 @@ std::string GetMimeType(const std::string& path) {
 }
 
 void encodeLoginJson(grpcClient::api_error_id id, const std::string& message, std::string& resp_json) {
-    // Json::Value root;
     JsonDoc root;
     root.root()["id"].set(grpcClient::api_error_id_to_string(id));
     root.root()["message"].set(message);
-    // root["id"] = grpcClient::api_error_id_to_string(id);
-    // root["message"] = message;
-    // Json::FastWriter writer;
     resp_json = root.toString();
 }
 
@@ -58,6 +44,13 @@ void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const
         conn->send(resJson);
 
         if(res.closeConnection()) conn->shutdown();
+    };
+
+    auto sendHeadResponse = [] (const TcpConnectionPtr& conn, const HttpResponse& res, std::size_t body_size) {
+        std::string resJson{};
+        res.appendToHeadBuffer(resJson, body_size);
+
+        conn->send(resJson);
     };
 
     if(req.path() == "/api/reg") {
@@ -170,8 +163,10 @@ void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const
             file_path = "/index.html";
         }
 
-        std::string full_path = base_dir + file_path;
-        std::string content = readFile(full_path);
+        // std::string full_path = base_dir + file_path;
+        // std::string content = readFile(full_path);
+
+        std::string content = HttpServer::StaticFilesHash[file_path];
 
         if (!content.empty()) {
             // 找到了对应的静态文件 (如 /assets/index-xxx.js)
@@ -196,7 +191,8 @@ void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const
             } else {
                 // 对于 React 单页应用，如果用户刷新了某个前端路由（如 /chat），
                 // 后端找不到这个文件，应该统一返回 index.html，交由前端 React Router 处理
-                std::string index_content = readFile(base_dir + "/index.html");
+                // std::string index_content = readFile(base_dir + "/index.html");
+                std::string index_content = HttpServer::StaticFilesHash["/"];
                 if (!index_content.empty()) {
                     res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
                     res.setStatusMessage("OK");

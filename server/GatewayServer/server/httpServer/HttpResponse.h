@@ -28,6 +28,7 @@ public:
     void addHeader(const std::string& key, const std::string& value);
     void setBody(const std::string& body);
     void appendToBuffer(std::string& output) const;
+    void appendToHeadBuffer(std::string& output, std::size_t body_size) const;
 
 private:
     std::map<std::string, std::string> headers_;

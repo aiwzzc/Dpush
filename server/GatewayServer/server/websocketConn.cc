@@ -1,5 +1,6 @@
 #include "websocketConn.h"
 #include "GatewayPubSubManager.h"
+#include "../../flatbuffers/chat_generated.h"
 
 #include <openssl/sha.h>
 #include <sstream>
@@ -127,10 +128,10 @@ void WebsocketConn::send(const std::string& msg)
 void WebsocketConn::send(const char* msg, std::size_t len) 
 { this->conn_->send(msg, len); }
 
-std::vector<std::string> WebsocketConn::onRead(const TcpConnectionPtr& conn, muduo::net::Buffer* buf) {
+std::vector<std::pair<const char*, std::size_t>> WebsocketConn::onRead(const TcpConnectionPtr& conn, muduo::net::Buffer* buf) {
     if(conn->disconnected()) return {};
 
-    std::vector<std::string> messageList;
+    std::vector<std::pair<const char*, std::size_t>> messageList;
 
     // 使用 while 循环，处理可能存在的多个粘包帧
     while (buf->readableBytes() >= 2) {
@@ -170,7 +171,6 @@ std::vector<std::string> WebsocketConn::onRead(const TcpConnectionPtr& conn, mud
         }
 
         // 此时已经收到一个完整的帧，提取 Payload
-        // std::string payload_data = buf.substr(offset, payload_length);
         std::string payload_data{buf->peek() + offset, payload_length};
         
         // 解码
@@ -183,7 +183,10 @@ std::vector<std::string> WebsocketConn::onRead(const TcpConnectionPtr& conn, mud
 
         buf->retrieve(offset + payload_length);
 
-        messageList.emplace_back(payload_data);
+        flatbuffers::Verifier verifier((const uint8_t*)payload_data.c_str(), payload_data.size());
+        if (!ChatApp::VerifyRootMessageBuffer(verifier)) continue;
+
+        messageList.emplace_back(payload_data.c_str(), payload_length);
 
     }
     return messageList;

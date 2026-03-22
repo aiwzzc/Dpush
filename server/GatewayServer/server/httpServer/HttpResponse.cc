@@ -53,7 +53,36 @@ void HttpResponse::appendToBuffer(std::string& output) const {
         output.append("\r\n");
     }
 
-    // output.append("Content-Type:application/json;charset=utf-8\r\n");
     output.append("\r\n");
     output.append(this->body_);
+}
+
+void HttpResponse::appendToHeadBuffer(std::string& output, std::size_t body_size) const {
+    output.append("HTTP/1.1 ");
+    output.append(std::to_string(static_cast<int>(this->statusCode_)));
+    output.append(" ");
+    output.append(this->statusMessage_);
+    output.append("\r\n");
+
+    if(this->closeConnection_) output.append("Connection: close\r\n");
+    else output.append("Connection: Keep-alive\r\n");
+
+    if(!this->cookie_.empty()) {
+        output.append("set-cookie: sid=" + this->cookie_ + "; ");
+        output.append("Path=/; ");  // 添加路径设置
+        output.append("HttpOnly; Max-Age=86400; SameSite=Strict\r\n");
+    }
+
+    output.append("Content-Length: ");
+    output.append(std::to_string(body_size));
+    output.append("\r\n");
+
+    for(const auto& [key, value] : this->headers_) {
+        output.append(key);
+        output.append(": ");
+        output.append(value);
+        output.append("\r\n");
+    }
+
+    output.append("\r\n");
 }

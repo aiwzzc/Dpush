@@ -5,6 +5,7 @@
 #include "GatewayPubSubManager.h"
 #include "producer.h"
 #include "GatewayServer.h"
+#include "../../flatbuffers/chat_generated.h"
 
 #include "../../base/JsonView.h"
 
@@ -229,37 +230,68 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
             if(conn->disconnected()) return;
             WebsocketConnPtr wsContextPtr = *(std::any_cast<WebsocketConnPtr>(conn->getMutableContext()));
 
-            std::vector<std::string> messageList = wsContextPtr->onRead(conn, buffer);
+            std::vector<std::pair<const char*, std::size_t>> messageList = wsContextPtr->onRead(conn, buffer);
 
             if(messageList.empty()) return;
 
-            for(auto& message : messageList) {
+            // for(auto& message : messageList) {
 
-                JsonDoc root;
+            //     JsonDoc root;
 
-                if(!root.parse(message.c_str(), message.size())) continue;
+            //     if(!root.parse(message.c_str(), message.size())) continue;
 
-                std::string messageType = root.root()["type"].asString();
+            //     std::string messageType = root.root()["type"].asString();
 
-                if(messageType == "ClientMessage") {
+            //     if(messageType == "ClientMessage") {
 
-                    std::string roomid = root.root()["payload"]["roomId"].asString();
-                    std::string clientMessageId = root.root()["clientMessageId"].asString();
+            //         std::string roomid = root.root()["payload"]["roomId"].asString();
+            //         std::string clientMessageId = root.root()["clientMessageId"].asString();
 
-                    KafkaDeliveryContext* ctx = new KafkaDeliveryContext{conn, clientMessageId};
+            //         KafkaDeliveryContext* ctx = new KafkaDeliveryContext{conn, clientMessageId};
 
-                    producer->produce("chat_room_messages", message.data(), message.size(), roomid, roomid.size(), ctx, 
-                    wsContextPtr->userid(), wsContextPtr->username());
+            //         producer->produce("chat_room_messages", message.data(), message.size(), roomid, roomid.size(), ctx, 
+            //         wsContextPtr->userid(), wsContextPtr->username());
 
-                } else if(messageType == "RequestRoomHistory" || messageType == "PullMissingMessages") {
-                    client->rpcCilentMessageAsync(message, wsContextPtr->userid(), wsContextPtr->username(), 
-                    [wsContextPtr] (std::string msg) {
-                        wsContextPtr->send(msg);
-                    });
+            //     } else if(messageType == "RequestRoomHistory" || messageType == "PullMissingMessages") {
+            //         client->rpcCilentMessageAsync(message, wsContextPtr->userid(), wsContextPtr->username(), 
+            //         [wsContextPtr] (std::string msg) {
+            //             wsContextPtr->send(msg);
+            //         });
 
-                } else { return; }
+            //     } else { return; }
+            // }
+            for(auto& [message, message_size] : messageList) {
+                auto rootMsg = ChatApp::GetRootMessage(message);
+
+                switch(rootMsg->payload_type()) {
+                    case ChatApp::AnyPayload_ClientMessagePayload: {
+                        auto payload = rootMsg->payload_as_ClientMessagePayload();
+
+                        std::string_view roomid{payload->room_id()->c_str(), payload->room_id()->size()};
+                        std::string_view clientMessageId{payload->client_message_id()->c_str(), 
+                            payload->client_message_id()->size()};
+
+                        KafkaDeliveryContext* ctx = new KafkaDeliveryContext{conn, clientMessageId.data()};
+
+                        producer->produce("chat_room_messages", message, message_size, roomid.data(), roomid.size(), ctx, 
+                        wsContextPtr->userid(), wsContextPtr->username());
+                    }
+
+                    case ChatApp::AnyPayload_RequestRoomHistoryPayload: {
+                        client->rpcCilentMessageAsync(message, wsContextPtr->userid(), wsContextPtr->username(), 
+                        [wsContextPtr] (std::string msg) {
+                            wsContextPtr->send(msg);
+                        });
+                    }
+
+                    case ChatApp::AnyPayload_PullMissingMessagePayload: {
+                        client->rpcCilentMessageAsync(message, wsContextPtr->userid(), wsContextPtr->username(), 
+                        [wsContextPtr] (std::string msg) {
+                            wsContextPtr->send(msg);
+                        });
+                    }
+                }
             }
         });
-
     }
 }

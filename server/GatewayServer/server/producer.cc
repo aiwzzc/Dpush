@@ -105,7 +105,21 @@ void kafkaProducer::init_kafka() {
     delete conf;
 }
 
-RdKafka::ErrorCode kafkaProducer::produce(const std::string& topic, char* data, std::size_t data_len, 
+// RdKafka::ErrorCode kafkaProducer::produce(const std::string& topic, char* data, std::size_t data_len, 
+//     const std::string& key, std::size_t key_len, void* ctx, int32_t userid, std::string& username) {
+    
+//     RdKafka::Headers* header = RdKafka::Headers::create();
+
+//     header->add("userid", std::to_string(userid));
+//     header->add("username", username);
+
+//     RdKafka::ErrorCode err = this->producer_->produce(topic, RdKafka::Topic::PARTITION_UA, RdKafka::Producer::RK_MSG_COPY,
+//     const_cast<char*>(data), data_len, key.c_str(), key_len, 0, header, ctx);
+
+//     return err;
+// }
+
+RdKafka::ErrorCode kafkaProducer::produce(const std::string& topic, const char* data, std::size_t data_len, 
     const std::string& key, std::size_t key_len, void* ctx, int32_t userid, std::string& username) {
     
     RdKafka::Headers* header = RdKafka::Headers::create();

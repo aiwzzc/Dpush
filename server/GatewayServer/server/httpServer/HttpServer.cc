@@ -7,9 +7,24 @@
 
 #include "../GatewayPubSubManager.h"
 
+#include <fstream>
+#include <sstream>
+
+std::unordered_map<std::string, std::string> HttpServer::StaticFilesHash{};
+
+static std::string readFile(const std::string& filePath) {
+    std::ifstream file(filePath);
+    if (!file) {
+        return "";
+    }
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
+
 HttpServer::HttpServer(const muduo::net::InetAddress &addr, const std::string& name, int num_event_loops):
     loop_(std::make_unique<EventLoop>()), 
-    server_(std::make_unique<TcpServer>(this->loop_.get(), addr, name)) {
+    server_(std::make_unique<TcpServer>(this->loop_.get(), addr, name, TcpServer::kReusePort)) {
     this->server_->setMessageCallback([this] (const TcpConnectionPtr& conn, muduo::net::Buffer* buf, muduo::Timestamp) {
         onMessage(conn, buf->retrieveAsString(buf->readableBytes()));
     });
@@ -22,6 +37,15 @@ HttpServer::HttpServer(const muduo::net::InetAddress &addr, const std::string& n
     this->server_->setThreadInitCallback([] (EventLoop* loop) {
         GatewayPubSubManager::RegisterLoop(loop);
     });
+
+    std::string base_dir = "/home/zzc/linux_test/DistributedPush/client/web/dist";
+
+    HttpServer::StaticFilesHash["/"] = readFile(base_dir + "/index.html");
+    HttpServer::StaticFilesHash["/assets/vendor-react-BmTVS5Bk.js"] = readFile(base_dir + "/assets/vendor-react-BmTVS5Bk.js");
+    HttpServer::StaticFilesHash["/assets/vendor-DfouWq7l.js"] = readFile(base_dir + "/assets/vendor-DfouWq7l.js");
+    HttpServer::StaticFilesHash["/assets/index-gC83B9SE.js"] = readFile(base_dir + "/assets/index-gC83B9SE.js");
+    HttpServer::StaticFilesHash["/assets/index-CFPWEv43.css"] = readFile(base_dir + "/assets/index-CFPWEv43.css");
+    HttpServer::StaticFilesHash["/assets/vendor-genai-C1rGU7lY.js"] = readFile(base_dir + "/assets/vendor-genai-C1rGU7lY.js");
 }
 
 HttpServer::~HttpServer() = default;

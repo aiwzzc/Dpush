@@ -1,0 +1,109 @@
+namespace ChatApp; 
+
+enum MsgContentType : byte { 
+    Unknown = 0, 
+    Text = 1, 
+    Image = 2, 
+    Audio = 3 
+} 
+
+table User { 
+    userid: long; 
+    username: string; 
+}
+
+table RoomMessageItem {
+    id: string; 
+    content: string; 
+    user: User; 
+    timestamp: long; 
+    msg_type: MsgContentType = Text;
+    image_url: string;
+}
+
+table RoomItem {
+    has_more_messages: bool;
+    room_id: string;
+    roomname: string;
+    messages: [RoomMessageItem];
+}
+
+table ClientMessageItem { 
+    content: string; 
+    msg_type: MsgContentType = Text; 
+    image_url: string;
+} 
+
+table ServerMessageItem { 
+    client_message_id: string;  
+    server_message_id: long;    
+    content: string; 
+    user: User; 
+    timestamp: long; 
+    msg_type: MsgContentType = Text;
+    image_url: string;
+}
+
+table RequestMessageItem { 
+    id: string; 
+    content: string; 
+    user: User; 
+    timestamp: long; 
+    msg_type: MsgContentType = Text;
+    image_url: string;
+} 
+
+table ClientMessagePayload { 
+    room_id: string;         
+    client_message_id: string;
+    messages: [ClientMessageItem]; 
+} 
+
+table ServerMessagePayload { 
+    room_id: string; 
+    messages: [ServerMessageItem]; 
+} 
+
+table PullMissingMessagePayload { 
+    room_id: string;  
+    missing_message_ids: [long]; 
+} 
+
+table RequestRoomHistoryPayload { 
+    room_id: string; 
+    count: long; 
+    first_message_id: string;  
+} 
+
+table RequestMessagePayload { 
+    room_id: string;           
+    roomname: string; 
+    has_more_messages: bool;   
+    messages: [RequestMessageItem]; 
+} 
+
+table MessageAckPayload { 
+    client_message_id: string;  
+    status: string; 
+}
+
+table HelloMessagePayload {
+    me: User;
+    rooms: [RoomItem];
+}
+
+union AnyPayload {
+    HelloMessagePayload,
+    ClientMessagePayload, 
+    ServerMessagePayload, 
+    RequestRoomHistoryPayload, 
+    RequestMessagePayload, 
+    PullMissingMessagePayload, 
+    MessageAckPayload 
+} 
+
+table RootMessage { 
+    payload: AnyPayload; 
+} 
+
+root_type RootMessage;

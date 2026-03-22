@@ -42,3 +42,105 @@ struct MessageBatch
     // true if there are more messages that could be loaded
     bool has_more{};
 };
+
+/*
+
+{
+  "type": "ClientMessage",
+  "payload": {
+    "clientMessageId": "msg_1710000000000_a1b2c3d",
+    "roomId": "beast",
+    "messages": [
+      {
+        "content": "这是小鸭子发送的消息",
+        "msgType": "text"
+      }
+    ]
+  }
+}
+
+{
+  "type": "PullMissingMessages",
+  "payload": {
+    "roomId": "beast",
+    "missingMessageIds": [11, 12]
+  }
+}
+
+{
+    "type": "ServerMessage",
+    "payload": {
+        "roomId": "beast",
+        "message": [
+            {
+                "clientMessageId": ...,
+                "serverMessageId": 122,
+                "content": "hello world",
+                "user": {
+                    "id": 5,
+                    "username": "m0NESY"
+                },
+                "timestamp": 1772972215
+            },
+            {
+                "clientMessageId": ...,
+                "serverMessageId": 123,
+                "content": "batch message 2",
+                "user": {
+                    "id": 5,
+                    "username": "m0NESY"
+                },
+                "timestamp": 1772972216
+            }
+        ]
+    }
+}
+
+{
+    "type": "RequestRoomHistory",
+    "payload": {
+        count: 20,
+        firstMessageId: "63-0",
+        roomId: "f3909e6e-1bc4-11f1-a7fa-000c29dfa7f1"
+    }
+}
+
+{
+    "type": "RequestMessage",
+    "payload": {
+        "roomId": "beast",
+        "roomname": "coroutine",
+        "hasMoreMessages": true,
+        "message": [
+            {
+                "id": "uuid-123",
+                "content": "hello world",
+                "user": {
+                    "id": 5,
+                    "username": "m0NESY"
+                },
+                "timestamp": 1772972215
+            },
+            {
+                "id": "uuid-124",
+                "content": "batch message 2",
+                "user": {
+                    "id": 5,
+                    "username": "m0NESY"
+                },
+                "timestamp": 1772972216
+            }
+        ]
+    }
+}
+
+{
+  "type": "MessageAck",
+  "payload": {
+    "clientMessageId": "msg_1710000000000_a1b2c3d",
+    "status": "SUCCESS"
+  }
+}
+
+*/
+

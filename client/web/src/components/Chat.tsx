@@ -2,6 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { User, Message, Room } from '../types';
 import { Send, Image as ImageIcon, LogOut, Sparkles, Loader2, Hash, Plus, X, Users, MessageSquare, AlertCircle, RefreshCw } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
+import * as flatbuffers from 'flatbuffers';
+import { RootMessage, AnyPayload, ServerMessagePayload, RequestMessagePayload, MessageAckPayload, MsgContentType, HelloMessagePayload } from '../generated/chat_app';
+import { encodeClientMessage, encodePullMissingMessages, encodeRequestRoomHistory } from '../utils/fb-helper';
 
 const DEFAULT_ROOMS: Room[] = [
   { id: 'general', name: '大厅', description: '所有人都在这里畅所欲言' },
@@ -89,57 +92,304 @@ export function Chat({ user, onLogout }: ChatProps) {
     const wsUrl = `${protocol}//${window.location.host}/ws`;
     const socket = new WebSocket(wsUrl);
 
+    socket.binaryType = 'arraybuffer';
+
     socket.onopen = () => {
       console.log('WebSocket connected');
-      // 发送认证或上线消息
-      socket.send(JSON.stringify({ type: 'auth', user: user.username }));
     };
 
-    socket.onmessage = (event) => {
+    socket.onmessage = async (event) => {
       try {
-        const data = JSON.parse(event.data);
-        
-        // 处理初始化的 hello 消息
-        if (data.type === 'hello' && data.payload) {
-          if (data.payload.me) {
-            setCurrentUser(data.payload.me);
+        if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
+          // 处理 FlatBuffers 消息
+          const arrayBuffer = event.data instanceof Blob ? await event.data.arrayBuffer() : event.data;
+          const buf = new flatbuffers.ByteBuffer(new Uint8Array(arrayBuffer));
+          const root = RootMessage.getRootAsRootMessage(buf);
+          const payloadType = root.payloadType();
+
+          if (payloadType === AnyPayload.ServerMessagePayload) {
+            const payload = root.payload(new ServerMessagePayload()) as ServerMessagePayload;
+            const roomId = payload.roomId() || 'general';
+            const messagesLen = payload.messagesLength();
+            
+            let messagesToAdd: Message[] = [];
+            let hasNewMessages = false;
+
+            const processMsg = (msgRaw: any, sMsgId: number) => {
+              const parsedMsg: Message = {
+                id: msgRaw.id || Date.now().toString(),
+                clientMessageId: msgRaw.clientMessageId,
+                serverMessageId: sMsgId,
+                sender: msgRaw.user?.username || 'Unknown',
+                content: msgRaw.content,
+                timestamp: parseTimestamp(msgRaw.timestamp),
+                type: msgRaw.msgType || 'text',
+                imageUrl: msgRaw.imageUrl
+              };
+              messagesToAdd.push(parsedMsg);
+              hasNewMessages = true;
+
+              if (!isNaN(sMsgId)) {
+                roomMaxServerMsgIdRef.current[roomId] = sMsgId;
+                const nextId = sMsgId + 1;
+                if (pendingMessagesRef.current[roomId] && pendingMessagesRef.current[roomId][nextId]) {
+                  const nextMsgRaw = pendingMessagesRef.current[roomId][nextId];
+                  delete pendingMessagesRef.current[roomId][nextId];
+                  processMsg(nextMsgRaw, nextId);
+                }
+              }
+            };
+
+            const incomingMessages = [];
+            for (let i = 0; i < messagesLen; i++) {
+              const msg = payload.messages(i);
+              if (msg) {
+                incomingMessages.push({
+                  id: msg.serverMessageId().toString(),
+                  clientMessageId: msg.clientMessageId(),
+                  serverMessageId: Number(msg.serverMessageId()),
+                  content: msg.content(),
+                  user: { username: msg.user()?.username() || 'Unknown' },
+                  timestamp: Number(msg.timestamp()),
+                  msgType: msg.msgType() === MsgContentType.Image ? 'image' : 'text',
+                  imageUrl: msg.imageUrl() || undefined
+                });
+              }
+            }
+
+            // 按 serverMessageId 排序，以防后端批量下发时乱序
+            const sortedMessages = incomingMessages.sort((a, b) => {
+              const idA = a.serverMessageId !== undefined ? Number(a.serverMessageId) : 0;
+              const idB = b.serverMessageId !== undefined ? Number(b.serverMessageId) : 0;
+              return idA - idB;
+            });
+
+            sortedMessages.forEach((msgRaw: any) => {
+              const serverMessageId = msgRaw.serverMessageId !== undefined ? Number(msgRaw.serverMessageId) : NaN;
+
+              if (!isNaN(serverMessageId)) {
+                const currentMax = roomMaxServerMsgIdRef.current[roomId];
+                
+                if (currentMax === undefined) {
+                  processMsg(msgRaw, serverMessageId);
+                } else if (serverMessageId <= currentMax) {
+                  console.log(`Ignored duplicate or old message ${serverMessageId} for room ${roomId}`);
+                } else if (serverMessageId === currentMax + 1) {
+                  processMsg(msgRaw, serverMessageId);
+                } else {
+                  if (!pendingMessagesRef.current[roomId]) {
+                    pendingMessagesRef.current[roomId] = {};
+                  }
+                  pendingMessagesRef.current[roomId][serverMessageId] = msgRaw;
+                  
+                  const missingIds: number[] = [];
+                  for (let id = currentMax + 1; id < serverMessageId; id++) {
+                    if (!pendingMessagesRef.current[roomId][id]) {
+                      missingIds.push(id);
+                    }
+                  }
+                  
+                  if (missingIds.length > 0) {
+                    const delay = Math.floor(Math.random() * 1900) + 100;
+                    setTimeout(() => {
+                      const currentMaxNow = roomMaxServerMsgIdRef.current[roomId] || 0;
+                      const stillMissing = missingIds.filter(id => 
+                        currentMaxNow < id && !pendingMessagesRef.current[roomId]?.[id]
+                      );
+                      
+                      if (stillMissing.length > 0 && socket.readyState === WebSocket.OPEN) {
+                        const pullReqBuf = encodePullMissingMessages(roomId, stillMissing);
+                        socket.send(pullReqBuf);
+                      }
+                    }, delay);
+                  }
+                }
+              } else {
+                processMsg(msgRaw, NaN);
+              }
+            });
+
+            if (hasNewMessages) {
+              setMessages(prev => {
+                const existingRoomMsgs = prev[roomId] || [];
+                const newRoomMsgs = [...existingRoomMsgs];
+                
+                messagesToAdd.forEach(newMsg => {
+                  if (newMsg.clientMessageId) {
+                    if (networkRetryTimersRef.current[newMsg.clientMessageId]) {
+                      clearInterval(networkRetryTimersRef.current[newMsg.clientMessageId]);
+                      delete networkRetryTimersRef.current[newMsg.clientMessageId];
+                    }
+                    if (businessTimeoutTimersRef.current[newMsg.clientMessageId]) {
+                      clearTimeout(businessTimeoutTimersRef.current[newMsg.clientMessageId]);
+                      delete businessTimeoutTimersRef.current[newMsg.clientMessageId];
+                    }
+                  }
+
+                  const existingIdx = newRoomMsgs.findIndex(m => 
+                    (m.clientMessageId && m.clientMessageId === newMsg.clientMessageId) || 
+                    m.id === newMsg.id
+                  );
+
+                  if (existingIdx >= 0) {
+                    newRoomMsgs[existingIdx] = {
+                      ...newRoomMsgs[existingIdx],
+                      ...newMsg,
+                      status: 'success'
+                    };
+                  } else {
+                    newRoomMsgs.push({ ...newMsg, status: 'success' });
+                  }
+                });
+
+                newRoomMsgs.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+                return {
+                  ...prev,
+                  [roomId]: newRoomMsgs
+                };
+              });
+              
+              if (roomId === currentRoomIdRef.current) {
+                if (isAtBottomRef.current) {
+                  setTimeout(scrollToBottom, 50);
+                } else {
+                  setUnreadCount(prev => prev + messagesToAdd.length);
+                }
+              }
+            }
+          } else if (payloadType === AnyPayload.RequestMessagePayload) {
+            const payload = root.payload(new RequestMessagePayload()) as RequestMessagePayload;
+            const roomId = payload.roomId() || 'general';
+            const hasMore = payload.hasMoreMessages();
+            const messagesLen = payload.messagesLength();
+            
+            const incomingMessages = [];
+            for (let i = 0; i < messagesLen; i++) {
+              const msg = payload.messages(i);
+              if (msg) {
+                incomingMessages.push({
+                  id: msg.id() || Date.now().toString(),
+                  clientMessageId: undefined, // RequestMessageItem schema doesn't have client_message_id
+                  sender: msg.user()?.username() || 'Unknown',
+                  content: msg.content(),
+                  timestamp: parseTimestamp(Number(msg.timestamp())),
+                  type: msg.msgType() === MsgContentType.Image ? 'image' : 'text',
+                  imageUrl: msg.imageUrl() || undefined
+                });
+              }
+            }
+
+            setHasMoreMessages(prev => ({
+              ...prev,
+              [roomId]: hasMore
+            }));
+
+            const container = messageContainerRef.current;
+            const previousScrollHeight = container ? container.scrollHeight : 0;
+            const previousScrollTop = container ? container.scrollTop : 0;
+
+            setMessages(prev => {
+              const existingMessages = prev[roomId] || [];
+              const updatedRoomMessages = [...incomingMessages, ...existingMessages];
+              updatedRoomMessages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+              return {
+                ...prev,
+                [roomId]: updatedRoomMessages
+              };
+            });
+            
+            setTimeout(() => {
+              if (container) {
+                const newScrollHeight = container.scrollHeight;
+                container.scrollTop = previousScrollTop + (newScrollHeight - previousScrollHeight);
+              }
+              setIsLoadingHistory(false);
+            }, 0);
+          } else if (payloadType === AnyPayload.MessageAckPayload) {
+            const payload = root.payload(new MessageAckPayload()) as MessageAckPayload;
+            const clientMessageId = payload.clientMessageId();
+            const status = payload.status();
+            
+            if (clientMessageId) {
+              if (status === 'SUCCESS') {
+                if (networkRetryTimersRef.current[clientMessageId]) {
+                  clearInterval(networkRetryTimersRef.current[clientMessageId]);
+                  delete networkRetryTimersRef.current[clientMessageId];
+                }
+              } else {
+                if (networkRetryTimersRef.current[clientMessageId]) {
+                  clearInterval(networkRetryTimersRef.current[clientMessageId]);
+                  delete networkRetryTimersRef.current[clientMessageId];
+                }
+                if (businessTimeoutTimersRef.current[clientMessageId]) {
+                  clearTimeout(businessTimeoutTimersRef.current[clientMessageId]);
+                  delete businessTimeoutTimersRef.current[clientMessageId];
+                }
+                setMessages(prev => {
+                  const newMessages = { ...prev };
+                  for (const rId in newMessages) {
+                    newMessages[rId] = newMessages[rId].map(m => 
+                      m.clientMessageId === clientMessageId ? { ...m, status: 'failed' } : m
+                    );
+                  }
+                  return newMessages;
+                });
+              }
+            }
+          } else if (payloadType === AnyPayload.HelloMessagePayload) {
+            const payload = root.payload(new HelloMessagePayload()) as HelloMessagePayload;
+            const me = payload.me();
+            if (me) {
+              setCurrentUser({ userid: Number(me.userid()), username: me.username() || 'Unknown' });
+            }
+            
+            const roomsLen = payload.roomsLength();
+            const parsedRooms: Room[] = [];
+            const initialMessages: Record<string, Message[]> = {};
+            const initialHasMore: Record<string, boolean> = {};
+
+            for (let i = 0; i < roomsLen; i++) {
+              const r = payload.rooms(i);
+              if (!r) continue;
+              const roomId = r.roomId() || '';
+              parsedRooms.push({
+                id: roomId,
+                name: r.roomname() || '',
+                description: ''
+              });
+
+              initialHasMore[roomId] = r.hasMoreMessages();
+              
+              const msgsLen = r.messagesLength();
+              const msgs: Message[] = [];
+              for (let j = 0; j < msgsLen; j++) {
+                const msg = r.messages(j);
+                if (!msg) continue;
+                msgs.push({
+                  id: msg.id() || Date.now().toString(),
+                  sender: msg.user()?.username() || 'Unknown',
+                  content: msg.content() || '',
+                  timestamp: parseTimestamp(Number(msg.timestamp())),
+                  type: msg.msgType() === MsgContentType.Image ? 'image' : 'text',
+                  imageUrl: msg.imageUrl() || undefined
+                });
+              }
+              initialMessages[roomId] = msgs.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+            }
+
+            setRooms(parsedRooms);
+            if (parsedRooms.length > 0 && !currentRoomIdRef.current) {
+              setCurrentRoom(parsedRooms[0]);
+            }
+            setMessages(prev => ({ ...prev, ...initialMessages }));
+            setHasMoreMessages(prev => ({ ...prev, ...initialHasMore }));
+            setTimeout(scrollToBottom, 100);
           }
-          
-          const incomingRooms = data.payload.rooms || [];
-          const parsedRooms: Room[] = incomingRooms.map((r: any) => ({
-            id: r.id,
-            name: r.name,
-            description: '' // 后端目前没有 description 字段，可以留空
-          }));
-          
-          setRooms(parsedRooms);
-          if (parsedRooms.length > 0 && !currentRoomIdRef.current) {
-            setCurrentRoom(parsedRooms[0]);
-          }
-
-          const initialMessages: Record<string, Message[]> = {};
-          const initialHasMore: Record<string, boolean> = {};
-
-          incomingRooms.forEach((r: any) => {
-            initialHasMore[r.id] = r.hasMoreMessage;
-            initialMessages[r.id] = (r.messages || [])
-              .map((msg: any) => ({
-                id: msg.id || Date.now().toString(),
-                sender: msg.user?.username || 'Unknown',
-                content: msg.content,
-                timestamp: parseTimestamp(msg.timestamp),
-                type: msg.msgType || 'text',
-                imageUrl: msg.imageUrl
-              }))
-              .sort((a: Message, b: Message) => a.timestamp.getTime() - b.timestamp.getTime());
-          });
-
-          setMessages(prev => ({ ...prev, ...initialMessages }));
-          setHasMoreMessages(prev => ({ ...prev, ...initialHasMore }));
-          
-          // 初始加载完成后滚动到底部
-          setTimeout(scrollToBottom, 100);
+          return;
         }
+
+        // 处理 JSON 消息 (如 serverCreateRoom 等不在 Schema 中的消息)
+        const data = JSON.parse(event.data);
         
         // 处理服务器广播的新建房间消息
         if (data.type === 'serverCreateRoom' && data.payload) {
@@ -154,237 +404,6 @@ export function Chat({ user, onLogout }: ChatProps) {
             if (prev.some(r => r.id === newRoom.id)) return prev;
             return [...prev, newRoom];
           });
-        }
-        
-        // 处理接收到的消息
-        if (data.type === 'ServerMessage' && data.payload) {
-          const roomId = data.payload.roomId || 'general';
-          const incomingMessages = data.payload.message || [];
-          
-          let messagesToAdd: Message[] = [];
-          let hasNewMessages = false;
-
-          const processMsg = (msgRaw: any, sMsgId: number) => {
-            const parsedMsg: Message = {
-              id: msgRaw.id || Date.now().toString(),
-              clientMessageId: msgRaw.clientMessageId,
-              serverMessageId: sMsgId,
-              sender: msgRaw.user?.username || 'Unknown',
-              content: msgRaw.content,
-              timestamp: parseTimestamp(msgRaw.timestamp),
-              type: msgRaw.msgType || 'text',
-              imageUrl: msgRaw.imageUrl
-            };
-            messagesToAdd.push(parsedMsg);
-            hasNewMessages = true;
-
-            if (!isNaN(sMsgId)) {
-              roomMaxServerMsgIdRef.current[roomId] = sMsgId;
-              const nextId = sMsgId + 1;
-              if (pendingMessagesRef.current[roomId] && pendingMessagesRef.current[roomId][nextId]) {
-                const nextMsgRaw = pendingMessagesRef.current[roomId][nextId];
-                delete pendingMessagesRef.current[roomId][nextId];
-                processMsg(nextMsgRaw, nextId);
-              }
-            }
-          };
-
-          // 按 serverMessageId 排序，以防后端批量下发时乱序
-          const sortedMessages = [...incomingMessages].sort((a, b) => {
-            const idA = a.serverMessageId !== undefined ? Number(a.serverMessageId) : 0;
-            const idB = b.serverMessageId !== undefined ? Number(b.serverMessageId) : 0;
-            return idA - idB;
-          });
-
-          sortedMessages.forEach((msgRaw: any) => {
-            const serverMessageId = msgRaw.serverMessageId !== undefined ? Number(msgRaw.serverMessageId) : NaN;
-
-            if (!isNaN(serverMessageId)) {
-              const currentMax = roomMaxServerMsgIdRef.current[roomId];
-              
-              if (currentMax === undefined) {
-                // 第一次收到该房间的消息，初始化 maxId
-                processMsg(msgRaw, serverMessageId);
-              } else if (serverMessageId <= currentMax) {
-                // 收到重复或旧消息，忽略
-                console.log(`Ignored duplicate or old message ${serverMessageId} for room ${roomId}`);
-              } else if (serverMessageId === currentMax + 1) {
-                // 收到期望的下一条消息
-                processMsg(msgRaw, serverMessageId);
-              } else {
-                // 发现 Gap (serverMessageId > currentMax + 1)
-                if (!pendingMessagesRef.current[roomId]) {
-                  pendingMessagesRef.current[roomId] = {};
-                }
-                // 暂存这条超前的消息
-                pendingMessagesRef.current[roomId][serverMessageId] = msgRaw;
-                
-                const missingIds: number[] = [];
-                for (let id = currentMax + 1; id < serverMessageId; id++) {
-                  if (!pendingMessagesRef.current[roomId][id]) {
-                    missingIds.push(id);
-                  }
-                }
-                
-                if (missingIds.length > 0) {
-                  const delay = Math.floor(Math.random() * 1900) + 100; // 100ms - 2000ms
-                  setTimeout(() => {
-                    const currentMaxNow = roomMaxServerMsgIdRef.current[roomId] || 0;
-                    // 检查定时器触发时，这些消息是否仍然缺失
-                    const stillMissing = missingIds.filter(id => 
-                      currentMaxNow < id && !pendingMessagesRef.current[roomId]?.[id]
-                    );
-                    
-                    if (stillMissing.length > 0 && socket.readyState === WebSocket.OPEN) {
-                      const pullReq = {
-                        type: 'PullMissingMessages',
-                        payload: {
-                          roomId: roomId,
-                          missingMessageIds: stillMissing
-                        }
-                      };
-                      socket.send(JSON.stringify(pullReq));
-                    }
-                  }, delay);
-                }
-              }
-            } else {
-              // 兼容没有 serverMessageId 的情况
-              processMsg(msgRaw, NaN);
-            }
-          });
-
-          if (hasNewMessages) {
-            setMessages(prev => {
-              const existingRoomMsgs = prev[roomId] || [];
-              const newRoomMsgs = [...existingRoomMsgs];
-              
-              messagesToAdd.forEach(newMsg => {
-                // 如果是我们自己发的消息，收到 ServerMessage 说明业务处理成功
-                if (newMsg.clientMessageId) {
-                  if (networkRetryTimersRef.current[newMsg.clientMessageId]) {
-                    clearInterval(networkRetryTimersRef.current[newMsg.clientMessageId]);
-                    delete networkRetryTimersRef.current[newMsg.clientMessageId];
-                  }
-                  if (businessTimeoutTimersRef.current[newMsg.clientMessageId]) {
-                    clearTimeout(businessTimeoutTimersRef.current[newMsg.clientMessageId]);
-                    delete businessTimeoutTimersRef.current[newMsg.clientMessageId];
-                  }
-                }
-
-                const existingIdx = newRoomMsgs.findIndex(m => 
-                  (m.clientMessageId && m.clientMessageId === newMsg.clientMessageId) || 
-                  m.id === newMsg.id
-                );
-
-                if (existingIdx >= 0) {
-                  // 替换乐观更新的消息，并标记为成功（取消转圈圈）
-                  newRoomMsgs[existingIdx] = {
-                    ...newRoomMsgs[existingIdx],
-                    ...newMsg,
-                    status: 'success'
-                  };
-                } else {
-                  newRoomMsgs.push({ ...newMsg, status: 'success' });
-                }
-              });
-
-              newRoomMsgs.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-              return {
-                ...prev,
-                [roomId]: newRoomMsgs
-              };
-            });
-            
-            if (roomId === currentRoomIdRef.current) {
-              if (isAtBottomRef.current) {
-                setTimeout(scrollToBottom, 50);
-              } else {
-                setUnreadCount(prev => prev + messagesToAdd.length);
-              }
-            }
-          }
-        }
-
-        // 处理历史消息
-        if (data.type === 'RequestMessage' && data.payload) {
-          const roomId = data.payload.roomId;
-          const incomingMessages = data.payload.message || [];
-          const hasMore = data.payload.hasMoreMessages;
-
-          const parsedHistoryMessages: Message[] = incomingMessages.map((msg: any) => ({
-            id: msg.id || Date.now().toString(),
-            clientMessageId: msg.clientMessageId,
-            sender: msg.user?.username || 'Unknown',
-            content: msg.content,
-            timestamp: parseTimestamp(msg.timestamp),
-            type: msg.msgType || 'text',
-            imageUrl: msg.imageUrl
-          }));
-
-          setHasMoreMessages(prev => ({
-            ...prev,
-            [roomId]: hasMore
-          }));
-
-          // 记录更新前的高度和滚动位置，用于保持视口稳定
-          const container = messageContainerRef.current;
-          const previousScrollHeight = container ? container.scrollHeight : 0;
-          const previousScrollTop = container ? container.scrollTop : 0;
-
-          setMessages(prev => {
-            const existingMessages = prev[roomId] || [];
-            // 将历史消息加到前面
-            const updatedRoomMessages = [...parsedHistoryMessages, ...existingMessages];
-            // 确保消息始终按时间戳升序排列
-            updatedRoomMessages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-            return {
-              ...prev,
-              [roomId]: updatedRoomMessages
-            };
-          });
-          
-          // 恢复滚动位置，使得用户感觉画面没有跳动
-          setTimeout(() => {
-            if (container) {
-              const newScrollHeight = container.scrollHeight;
-              // 新的高度减去旧的高度，就是新增内容的高度。将滚动条向下移动这个高度，就能保持原来的内容在视口中
-              container.scrollTop = previousScrollTop + (newScrollHeight - previousScrollHeight);
-            }
-            setIsLoadingHistory(false);
-          }, 0);
-        }
-
-        // 处理消息 ACK
-        if (data.type === 'MessageAck' && data.payload) {
-          const { clientMessageId, status } = data.payload;
-          
-          if (status === 'SUCCESS') {
-            // 收到网关 ACK，停止网络重传定时器，但保持 sending 状态（转圈圈）
-            if (networkRetryTimersRef.current[clientMessageId]) {
-              clearInterval(networkRetryTimersRef.current[clientMessageId]);
-              delete networkRetryTimersRef.current[clientMessageId];
-            }
-          } else {
-            // 如果网关明确返回失败，直接标记为 failed
-            if (networkRetryTimersRef.current[clientMessageId]) {
-              clearInterval(networkRetryTimersRef.current[clientMessageId]);
-              delete networkRetryTimersRef.current[clientMessageId];
-            }
-            if (businessTimeoutTimersRef.current[clientMessageId]) {
-              clearTimeout(businessTimeoutTimersRef.current[clientMessageId]);
-              delete businessTimeoutTimersRef.current[clientMessageId];
-            }
-            setMessages(prev => {
-              const newMessages = { ...prev };
-              for (const rId in newMessages) {
-                newMessages[rId] = newMessages[rId].map(m => 
-                  m.clientMessageId === clientMessageId ? { ...m, status: 'failed' } : m
-                );
-              }
-              return newMessages;
-            });
-          }
         }
       } catch (e) {
         console.error('Failed to parse message', e);
@@ -402,19 +421,11 @@ export function Chat({ user, onLogout }: ChatProps) {
     };
   }, [user.username]);
 
-  const sendClientMessage = (roomId: string, content: string, clientMessageId: string, isRetry = false) => {
-    const newMsgObj = {
-      clientMessageId,
-      type: 'ClientMessage',
-      payload: {
-        roomId,
-        messages: [{ content, msgType: 'text' }]
-      }
-    };
-
+  const sendClientMessage = (roomId: string, content: string, clientMessageId: string, isRetry = false, msgType: 'text' | 'image' = 'text', imageUrl?: string) => {
     const sendToWs = () => {
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(newMsgObj));
+        const buf = encodeClientMessage(roomId, clientMessageId, content, msgType, imageUrl);
+        ws.send(buf);
       }
     };
 
@@ -560,20 +571,10 @@ export function Chat({ user, onLogout }: ChatProps) {
       }));
 
       // 将 AI 的回复通过 WebSocket 广播给房间里的其他人
-      const aiMsgObj = {
-        type: 'ClientMessage',
-        payload: {
-          roomId: roomId,
-          messages: [
-            {
-              content: aiReply,
-              msgType: 'text'
-            }
-          ]
-        }
-      };
+      const aiClientMessageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(aiMsgObj));
+        const buf = encodeClientMessage(roomId, aiClientMessageId, aiReply, 'text');
+        ws.send(buf);
       }
 
     } catch (error) {
@@ -687,21 +688,10 @@ export function Chat({ user, onLogout }: ChatProps) {
         }));
 
         // 生成成功后，也可以将图片消息通过 WebSocket 广播给其他人
-        const newMsgObj = {
-          type: 'ClientMessage',
-          payload: {
-            roomId: currentRoom.id,
-            messages: [
-              {
-                content: prompt,
-                imageUrl: imageUrl,
-                msgType: 'image'
-              }
-            ]
-          }
-        };
+        const imgClientMessageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
         if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify(newMsgObj));
+          const buf = encodeClientMessage(currentRoom.id, imgClientMessageId, prompt, 'image', imageUrl);
+          ws.send(buf);
         }
 
       } else {
@@ -749,15 +739,8 @@ export function Chat({ user, onLogout }: ChatProps) {
         const roomMessages = messages[currentRoom.id] || [];
         const firstMessageId = roomMessages.length > 0 ? roomMessages[0].id : '';
         
-        const requestMsg = {
-          type: 'RequestRoomHistory',
-          payload: {
-            roomId: currentRoom.id,
-            firstMessageId: firstMessageId,
-            count: 20
-          }
-        };
-        ws.send(JSON.stringify(requestMsg));
+        const buf = encodeRequestRoomHistory(currentRoom.id, firstMessageId, 20);
+        ws.send(buf);
       }
     }
   };
@@ -923,13 +906,32 @@ export function Chat({ user, onLogout }: ChatProps) {
                             <span className="text-sm font-medium text-slate-400">AI 正在绘制...</span>
                           </div>
                         ) : msg.imageUrl ? (
-                          <img 
-                            src={msg.imageUrl} 
-                            alt={msg.content} 
-                            className="rounded-xl max-w-full h-auto shadow-lg hover:shadow-xl transition-shadow cursor-pointer border border-white/10"
-                            referrerPolicy="no-referrer"
-                            onClick={() => window.open(msg.imageUrl, '_blank')}
-                          />
+                          <div className="relative">
+                            <img 
+                              src={msg.imageUrl} 
+                              alt={msg.content} 
+                              className={`rounded-xl max-w-full h-auto shadow-lg hover:shadow-xl transition-shadow cursor-pointer border border-white/10 ${msg.status === 'sending' ? 'opacity-70' : ''}`}
+                              referrerPolicy="no-referrer"
+                              onClick={() => window.open(msg.imageUrl, '_blank')}
+                            />
+                            {isMe && msg.status === 'sending' && (
+                              <div className="absolute top-2 right-2 bg-black/50 rounded-full p-1">
+                                <Loader2 size={16} className="animate-spin text-white" />
+                              </div>
+                            )}
+                            {isMe && msg.status === 'failed' && (
+                              <div className="absolute top-2 right-2 bg-black/50 rounded-full p-1 flex items-center gap-1">
+                                <AlertCircle size={16} className="text-red-400" title="发送失败" />
+                                <button 
+                                  onClick={() => sendClientMessage(currentRoom!.id, msg.content, msg.clientMessageId!, true, 'image', msg.imageUrl)}
+                                  className="text-white hover:text-red-300 transition-colors bg-white/10 hover:bg-white/20 rounded p-1"
+                                  title="重新发送"
+                                >
+                                  <RefreshCw size={14} />
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         ) : null}
                       </div>
                     )}

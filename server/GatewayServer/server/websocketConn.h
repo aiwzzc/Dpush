@@ -34,7 +34,8 @@ public:
     WebsocketConn(const TcpConnectionPtr&);
     ~WebsocketConn();
 
-    std::vector<std::string> onRead(const TcpConnectionPtr& conn, muduo::net::Buffer* buf);
+    // std::vector<std::string> onRead(const TcpConnectionPtr& conn, muduo::net::Buffer* buf);
+    std::vector<std::pair<const char*, std::size_t>> onRead(const TcpConnectionPtr& conn, muduo::net::Buffer* buf);
     void setUserid(int32_t userid);
     void setUsername(const std::string&);
     void setWebconnCloseCallback(const WebconnCloseCallback& cb);
