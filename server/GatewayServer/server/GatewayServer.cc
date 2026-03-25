@@ -25,7 +25,19 @@ static char* read_file(const char* filename) {
     return buf;
 }
 
-GatewayServer::GatewayServer() : HttpServer_(std::make_unique<HttpServer>(muduo::net::InetAddress{"0.0.0.0", 5005}, "HttpServer", 6)), 
+// GatewayServer::GatewayServer() : HttpServer_(std::make_unique<HttpServer>(muduo::net::InetAddress{"0.0.0.0", 5005}, "HttpServer", 6)), 
+// grpcClient_(std::make_shared<grpcClient>()),
+// GatewayPubSubManager_(std::make_unique<GatewayPubSubManager>()), kafkaProducer_(std::make_shared<kafkaProducer>()) {
+//     this->HttpServer_->setHttpCallback([this] (TcpConnectionPtr conn, HttpRequest req) {
+//         handleHttpEvent(conn, req, this->grpcClient_);
+//     });
+
+//     this->HttpServer_->setUpgradeCallback([this] (const TcpConnectionPtr& conn, const HttpRequest& req) {
+//         handleUpgradeEvent(conn, req, this->grpcClient_, this->kafkaProducer_);
+//     });
+// }
+
+GatewayServer::GatewayServer() : HttpServer_(std::make_unique<HttpServer>(5003, 3, "HttpServer", 9)), 
 grpcClient_(std::make_shared<grpcClient>()),
 GatewayPubSubManager_(std::make_unique<GatewayPubSubManager>()), kafkaProducer_(std::make_shared<kafkaProducer>()) {
     this->HttpServer_->setHttpCallback([this] (TcpConnectionPtr conn, HttpRequest req) {

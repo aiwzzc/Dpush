@@ -22,6 +22,8 @@ public:
     kafkaProducer();
     ~kafkaProducer();
 
+    static constexpr const char* CLIENTMESSAGETOPIC = "chat_room_messages";
+
     RdKafka::ErrorCode produce(const std::string& topic, const char* data, std::size_t data_len, 
     const std::string& key, std::size_t key_len, void* ctx, int32_t userid, std::string& username);
 

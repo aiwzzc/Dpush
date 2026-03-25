@@ -1,5 +1,7 @@
 #include "GatewayPubSubManager.h"
 #include "websocketConn.h"
+#include "../base/types.h"
+#include "iouring.h"
 
 std::unordered_map<int32_t, WebsocketConnPtr> GatewayPubSubManager::WebsockConnhash{};
 std::mutex GatewayPubSubManager::WebsockConnhashMutex{};
@@ -34,6 +36,8 @@ GatewayPubSubManager::GatewayPubSubManager() {
         std::string roomid = channel;
         if(roomid.rfind("room:", 0) == 0) roomid = channel.substr(5);
 
+        std::shared_ptr<std::string> shared_ws_frame = std::make_shared<std::string>(buildWebSocketFrame(msg, 0x02));
+
 #if 0
         std::size_t bucketIndex = std::hash<std::string>{}(roomid) % BUCKET_NUM;
         auto& bucket = GatewayPubSubManager::roomBuckets[bucketIndex];
@@ -47,23 +51,56 @@ GatewayPubSubManager::GatewayPubSubManager() {
             conn->send(msg);
         }
 #elif 1
+        
+#if 0
         for(EventLoop* loop : GatewayPubSubManager::all_io_loops_) {
-            loop->runInLoop([roomid, msg] () {
+            loop->runInLoop([roomid, shared_ws_frame, loop, this] () {
                 auto it = LocalWebsockConnRoomhash.find(roomid);
 
                 if(it != LocalWebsockConnRoomhash.end()) {
+                    auto conns_ptr = std::make_shared<std::vector<WebsocketConnPtr>>(it->second.begin(), it->second.end());
+                    sendInBatches(loop, conns_ptr, 0, shared_ws_frame);
+                }
+            });
+        }
+#elif 1
+
+        for(EventLoop* loop : GatewayPubSubManager::all_io_loops_) {
+            loop->runInLoop([roomid, shared_ws_frame] () {
+                
+                auto it = LocalWebsockConnRoomhash.find(roomid);
+    
+                if(it != LocalWebsockConnRoomhash.end()) {
+
                     for(const auto& conn : it->second) {
-                        conn->send(msg);
+                        conn->send(*shared_ws_frame);
                     }
                 }
             });
         }
+#endif
 
 #endif
 
     });
 
     this->consume_thread_ = std::thread(&GatewayPubSubManager::ConsumLoop, this);
+}
+
+void GatewayPubSubManager::sendInBatches(EventLoop* loop, std::shared_ptr<std::vector<WebsocketConnPtr>> conns,
+    int start_idx, std::shared_ptr<std::string> message) {
+    
+    int end_idx = std::min(start_idx + GatewayPubSubManager::batch_size, (int)conns->size());
+
+    for(int i = start_idx; i < end_idx; ++i) {
+        (*conns)[i]->send(*message);
+    }
+
+    if(end_idx < conns->size()) {
+        loop->runInLoop([message, conns, end_idx, this, loop] () {
+            sendInBatches(loop, conns, end_idx, message);
+        }); 
+    }
 }
 
 GatewayPubSubManager::~GatewayPubSubManager() {

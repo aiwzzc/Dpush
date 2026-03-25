@@ -43,6 +43,8 @@ struct MessageBatch
     bool has_more{};
 };
 
+std::string buildWebSocketFrame(const std::string& payload, uint8_t opcode = 0x01);
+
 /*
 
 {

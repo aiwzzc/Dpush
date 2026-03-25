@@ -18,6 +18,7 @@
 class WebsocketConn;
 using WebsocketConnPtr = std::shared_ptr<WebsocketConn>;
 using muduo::net::EventLoop;
+using muduo::net::TcpConnectionPtr;
 
 constexpr std::size_t BUCKET_NUM = 16;
 
@@ -30,6 +31,8 @@ struct RoomBucket {
 class GatewayPubSubManager {
 
 public:
+    static constexpr int batch_size = 1000;
+
     // userid --> websocketconn
     static std::unordered_map<int32_t, WebsocketConnPtr> WebsockConnhash;
     static std::mutex WebsockConnhashMutex;
@@ -54,6 +57,9 @@ public:
     static void SubscribeRoomSafe(const std::string& roomid);
     static void UnSubscribeRoomSafe(const std::string& roomid);
     static void RegisterLoop(EventLoop* loop);
+
+    void sendInBatches(EventLoop* loop, std::shared_ptr<std::vector<WebsocketConnPtr>> conns, 
+        int start_idx, std::shared_ptr<std::string> message);
 
 private:
     void ConsumLoop();

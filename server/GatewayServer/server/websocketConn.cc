@@ -9,31 +9,6 @@
 #include <mutex>
 #include <vector>
 
-// 构造 WebSocket 数据帧
-std::string buildWebSocketFrame(const std::string& payload, uint8_t opcode = 0x01) {
-    std::string frame;
-
-    frame.push_back(0x80 | (opcode & 0x0F));
-
-    size_t payload_length = payload.size();
-    if (payload_length <= 125) {
-        frame.push_back(static_cast<uint8_t>(payload_length));
-    } else if (payload_length <= 65535) {
-        frame.push_back(126);
-        frame.push_back(static_cast<uint8_t>((payload_length >> 8) & 0xFF));
-        frame.push_back(static_cast<uint8_t>(payload_length & 0xFF));
-    } else {
-        frame.push_back(127);
-        for (int i = 7; i >= 0; i--) {
-            frame.push_back(static_cast<uint8_t>((payload_length >> (8 * i)) & 0xFF));
-        }
-    }
-
-    frame += payload;
-
-    return frame;
-}
-
 WebsocketConn::WebsocketConn(const TcpConnectionPtr& conn) : conn_(conn) {}
 
 WebsocketConn::~WebsocketConn() = default;
@@ -128,10 +103,13 @@ void WebsocketConn::send(const std::string& msg)
 void WebsocketConn::send(const char* msg, std::size_t len) 
 { this->conn_->send(msg, len); }
 
-std::vector<std::pair<const char*, std::size_t>> WebsocketConn::onRead(const TcpConnectionPtr& conn, muduo::net::Buffer* buf) {
+TcpConnectionPtr WebsocketConn::conn() const
+{ return this->conn_; }
+
+std::vector<std::string> WebsocketConn::onRead(const TcpConnectionPtr& conn, muduo::net::Buffer* buf) {
     if(conn->disconnected()) return {};
 
-    std::vector<std::pair<const char*, std::size_t>> messageList;
+    std::vector<std::string> messageList;
 
     // 使用 while 循环，处理可能存在的多个粘包帧
     while (buf->readableBytes() >= 2) {
@@ -186,7 +164,7 @@ std::vector<std::pair<const char*, std::size_t>> WebsocketConn::onRead(const Tcp
         flatbuffers::Verifier verifier((const uint8_t*)payload_data.c_str(), payload_data.size());
         if (!ChatApp::VerifyRootMessageBuffer(verifier)) continue;
 
-        messageList.emplace_back(payload_data.c_str(), payload_length);
+        messageList.emplace_back(std::move(payload_data));
 
     }
     return messageList;

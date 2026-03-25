@@ -44,7 +44,7 @@ table RequestMessageItem {
     content: string; 
     user: User; 
     timestamp: long; 
-} 
+}
 
 table ClientMessagePayload { 
     room_id: string;         
@@ -85,6 +85,13 @@ table HelloMessagePayload {
     rooms: [RoomItem];
 }
 
+table StreamMessagePayload {
+    content: string;
+    userid: long;
+    username: string;
+    timestamp: long;
+}
+
 union AnyPayload {
     HelloMessagePayload,
     ClientMessagePayload, 
@@ -92,7 +99,8 @@ union AnyPayload {
     RequestRoomHistoryPayload, 
     RequestMessagePayload, 
     PullMissingMessagePayload, 
-    MessageAckPayload 
+    MessageAckPayload,
+    StreamMessagePayload
 } 
 
 table RootMessage { 

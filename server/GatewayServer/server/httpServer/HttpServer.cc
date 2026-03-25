@@ -4,6 +4,7 @@
 #include "HttpResponse.h"
 #include "muduo/net/EventLoop.h"
 #include "muduo/net/TcpConnection.h"
+#include "muduo/base/Logging.h"
 
 #include "../GatewayPubSubManager.h"
 
@@ -22,20 +23,63 @@ static std::string readFile(const std::string& filePath) {
     return buffer.str();
 }
 
-HttpServer::HttpServer(const muduo::net::InetAddress &addr, const std::string& name, int num_event_loops):
-    loop_(std::make_unique<EventLoop>()), 
-    server_(std::make_unique<TcpServer>(this->loop_.get(), addr, name, TcpServer::kReusePort)) {
-    this->server_->setMessageCallback([this] (const TcpConnectionPtr& conn, muduo::net::Buffer* buf, muduo::Timestamp) {
-        onMessage(conn, buf->retrieveAsString(buf->readableBytes()));
-    });
+// HttpServer::HttpServer(const muduo::net::InetAddress &addr, const std::string& name, int num_event_loops):
+//     loop_(std::make_unique<EventLoop>()), 
+//     server_(std::make_unique<TcpServer>(this->loop_.get(), addr, name, TcpServer::kReusePort)) {
+//     this->server_->setMessageCallback([this] (const TcpConnectionPtr& conn, muduo::net::Buffer* buf, muduo::Timestamp) {
+//         onMessage(conn, buf->retrieveAsString(buf->readableBytes()));
+//     });
 
-    this->server_->setConnectionCallback([this] (const TcpConnectionPtr& conn) { onConnection(conn); });
-    setHttpCallback([this] (const TcpConnectionPtr& conn, const HttpRequest& req) { defaultHttpCallback(conn, req); });
+//     this->server_->setConnectionCallback([this] (const TcpConnectionPtr& conn) { onConnection(conn); });
+//     setHttpCallback([this] (const TcpConnectionPtr& conn, const HttpRequest& req) { defaultHttpCallback(conn, req); });
 
-    this->server_->setThreadNum(num_event_loops);
+//     this->server_->setThreadNum(num_event_loops);
 
-    this->server_->setThreadInitCallback([] (EventLoop* loop) {
-        GatewayPubSubManager::RegisterLoop(loop);
+//     this->server_->setThreadInitCallback([] (EventLoop* loop) {
+//         GatewayPubSubManager::RegisterLoop(loop);
+//     });
+
+//     std::string base_dir = "/home/zzc/linux_test/DistributedPush/client/web/dist";
+
+//     HttpServer::StaticFilesHash["/"] = readFile(base_dir + "/index.html");
+//     HttpServer::StaticFilesHash["/assets/vendor-react-BmTVS5Bk.js"] = readFile(base_dir + "/assets/vendor-react-BmTVS5Bk.js");
+//     HttpServer::StaticFilesHash["/assets/vendor-DfouWq7l.js"] = readFile(base_dir + "/assets/vendor-DfouWq7l.js");
+//     HttpServer::StaticFilesHash["/assets/index-gC83B9SE.js"] = readFile(base_dir + "/assets/index-gC83B9SE.js");
+//     HttpServer::StaticFilesHash["/assets/index-CFPWEv43.css"] = readFile(base_dir + "/assets/index-CFPWEv43.css");
+//     HttpServer::StaticFilesHash["/assets/vendor-genai-C1rGU7lY.js"] = readFile(base_dir + "/assets/vendor-genai-C1rGU7lY.js");
+// }
+
+HttpServer::HttpServer(uint16_t start_port, int port_count, const std::string& name, int total_event_loops):
+    loop_(std::make_unique<EventLoop>()) {
+
+    int threads_per_server = total_event_loops / port_count;
+    if (threads_per_server < 1) threads_per_server = 1;
+
+    for(int i = 0; i < port_count; ++i) {
+        uint16_t port = start_port + i;
+        muduo::net::InetAddress addr{"0.0.0.0", port};
+
+        std::string server_name = name + "-" + std::to_string(port);
+
+        auto server = std::make_unique<TcpServer>(this->loop_.get(), addr, server_name, TcpServer::kReusePort);
+
+        server->setMessageCallback([this] (const TcpConnectionPtr& conn, muduo::net::Buffer* buf, muduo::Timestamp) {
+            onMessage(conn, buf->retrieveAsString(buf->readableBytes()));
+        });
+
+        server->setConnectionCallback([this] (const TcpConnectionPtr& conn) { onConnection(conn); });
+
+        server->setThreadNum(threads_per_server);
+
+        server->setThreadInitCallback([] (EventLoop* loop) {
+            GatewayPubSubManager::RegisterLoop(loop);
+        });
+
+        this->servers_.emplace_back(std::move(server));
+    }
+
+    setHttpCallback([this] (const TcpConnectionPtr& conn, const HttpRequest& req) { 
+        defaultHttpCallback(conn, req); 
     });
 
     std::string base_dir = "/home/zzc/linux_test/DistributedPush/client/web/dist";
@@ -50,8 +94,16 @@ HttpServer::HttpServer(const muduo::net::InetAddress &addr, const std::string& n
 
 HttpServer::~HttpServer() = default;
 
+// void HttpServer::start() {
+//     this->server_->start();
+//     this->loop_->loop(1000);
+// }
+
 void HttpServer::start() {
-    this->server_->start();
+    for (auto& server : servers_) {
+        server->start();
+    }
+
     this->loop_->loop(1000);
 }
 
@@ -60,7 +112,15 @@ void HttpServer::setHttpCallback(const HttpCallback& cb) { this->httpCallback_ =
 void HttpServer::setUpgradeCallback(const UpgradeCallback& cb) { this->upgradeCallback_ = std::move(cb); }
 
 void HttpServer::onConnection(const TcpConnectionPtr& conn) {
+    conn->setTcpNoDelay(true);
     conn->setContext(HttpContext{});
+
+    conn->setHighWaterMarkCallback([](const TcpConnectionPtr& c, size_t len) {
+            LOG_WARN << "HighWaterMark triggered! OutputBuffer size: " << len 
+                        << " bytes. Client receiving too slow or Server sending too fast!";
+        }, 
+        64 * 1024
+    );
 }
 
 void HttpServer::onMessage(const TcpConnectionPtr& conn, std::string buf) {

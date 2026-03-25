@@ -6,7 +6,6 @@
 #include "../../flatbuffers/chat_generated.h"
 
 #include <memory>
-#include <jsoncpp/json/json.h>
 
 LogicGrpcServer::LogicGrpcServer(MySQLConnPool* mysql, sw::redis::Redis* redis, ComputeThreadPool* thread) : 
 mysql_pool_(mysql), redis_pool_(redis), thread_pool_(thread) {}
@@ -50,175 +49,12 @@ struct UpdateAwaiter {
     std::string await_resume() { return this->status_; }
 };
 
-static std::string SerializeMessageToJson(const Message& msg) {
-    Json::Value root;
-    root["content"] = msg.content;
-    root["userid"] = msg.user_id;
-    root["timestamp"] = msg.timestamp;
-    root["username"] = msg.username;
-    return root.toStyledString();
-}
-
-struct RedisXaddAwaiter {
-
-    sw::redis::Redis* redis_;
-    std::vector<Message> messages_;
-    std::string roomid_;
-    ComputeThreadPool* threadpool_;
-
-    bool await_ready() const noexcept { return false; }
-    void await_suspend(std::coroutine_handle<> handle) {
-        this->threadpool_->submit([this, handle] () {
-            for(auto& message : this->messages_) {
-                std::string msg_json = SerializeMessageToJson(message);
-                std::vector<std::pair<std::string, std::string>> fields{{"payload", msg_json}};
-
-                message.id = this->redis_->xadd(this->roomid_, "*", fields.begin(), fields.end());
-            }
-
-            handle.resume();
-        });
-    }
-
-    bool await_resume() { return true; }
-};
-
 static uint64_t getCurrentTimestamp() {
     auto now = std::chrono::system_clock::time_point::clock::now();
     auto duration = now.time_since_epoch();
     auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration);
     return milliseconds.count(); //单位是毫秒
 }
-
-struct ParseClientJsonAwaiter {
-
-    Json::Value* root_;
-    std::vector<Message>* messages_;
-    int32_t userid_;
-    std::string username_;
-    ComputeThreadPool* threadpool_;
-    std::string roomid_;
-
-    bool await_ready() const noexcept { return false; }
-    void await_suspend(std::coroutine_handle<> handle) {
-        this->threadpool_->submit([this, handle] () {
-            Json::Value root = *this->root_;
-            if(root["payload"].isNull()) {
-                // 日志
-                handle.resume();
-                return;
-            }
-            Json::Value payload = root["payload"];
-
-            if(payload["roomId"].isNull()) {
-                // 日志
-                handle.resume();
-                return;
-            }
-            std::string roomId = payload["roomId"].asString();
-
-            if(payload["messages"].isNull()) {
-                // 日志
-                handle.resume();
-                return;
-            }
-            Json::Value messages = payload["messages"];
-
-            if(messages.isNull() || !messages.isArray()) {
-                // 日志
-                handle.resume();
-                return;
-            }
-
-            this->roomid_ = roomId;
-
-            for(int i = 0; i < messages.size(); ++i) {
-                Json::Value msg = messages[i];
-                Message message;
-                if(msg["content"].isNull()) {
-                    // 日志
-                    continue;
-                }
-                message.content = msg["content"].asString();
-                message.timestamp = getCurrentTimestamp();
-                message.user_id = this->userid_;
-                message.username = this->username_;
-                this->messages_->push_back(message);
-            }
-
-            handle.resume();
-        });
-    }
-
-    std::string await_resume() { return this->roomid_; }
-};
-
-static std::string buildWebSocketFrame(const std::string& payload, uint8_t opcode = 0x01) {
-    std::string frame;
-
-    frame.push_back(0x80 | (opcode & 0x0F));
-
-    size_t payload_length = payload.size();
-    if (payload_length <= 125) {
-        frame.push_back(static_cast<uint8_t>(payload_length));
-    } else if (payload_length <= 65535) {
-        frame.push_back(126);
-        frame.push_back(static_cast<uint8_t>((payload_length >> 8) & 0xFF));
-        frame.push_back(static_cast<uint8_t>(payload_length & 0xFF));
-    } else {
-        frame.push_back(127);
-        for (int i = 7; i >= 0; i--) {
-            frame.push_back(static_cast<uint8_t>((payload_length >> (8 * i)) & 0xFF));
-        }
-    }
-
-    frame += payload;
-
-    return frame;
-}
-
-struct fillServerJsonAwaiter {
-    
-    ComputeThreadPool* threadpool_;
-    std::vector<Message>* messages_;
-    std::string roomid_;
-    std::string serverMessage_;
-
-    bool await_ready() const noexcept { return false; }
-    void await_suspend(std::coroutine_handle<> handle) {
-        this->threadpool_->submit([this, handle] () {
-            Json::Value root;
-            Json::Value payload;
-            Json::Value messages;
-            root["type"] = "ServerMessage";
-            payload["roomId"] = this->roomid_;
-
-            for(const auto& msg : *(this->messages_)) {
-                Json::Value user;
-                Json::Value Msg;
-
-                Msg["id"] = msg.id;
-                Msg["content"] = msg.content;
-                user["userid"] = msg.user_id;
-                user["username"] = msg.username;
-                Msg["user"] = user;
-                Msg["timestamp"] = msg.timestamp;
-                messages.append(Msg);
-            }
-
-            if(!messages.empty()) payload["message"] = messages;
-            else payload["message"] = Json::arrayValue;
-
-            root["payload"] = payload;
-            Json::FastWriter writer;
-            this->serverMessage_ = buildWebSocketFrame(writer.write(root));
-
-            handle.resume();
-        });
-    }
-
-    std::string await_resume() { return this->serverMessage_; }
-};
 
 struct clearCursorsAwaiter {
 
@@ -299,51 +135,7 @@ struct GetUserCursors {
 
 };
 
-int fillMessageBatch(const std::pair<std::string, std::unordered_map<std::string, std::string>>& msgStream, MessageBatch& msgs) {
-    const std::string& msg_id = msgStream.first;
-    const std::unordered_map<std::string, std::string>& msg_fields = msgStream.second;
-
-    for(auto it = msg_fields.begin(); it != msg_fields.end(); ++it) {
-        Message msg;
-        msg.id = msg_id;
-
-        Json::Value root;
-        Json::Reader reader;
-       
-        bool ok = reader.parse(it->second, root);
-        if(!ok) return -1;
-
-        if(root["content"].isNull()) {
-            // 日志
-            return -2;
-        }
-        msg.content = root["content"].asString();
-
-        if(root["userid"].isNull()) {
-            // 日志
-            return -3;
-        }
-        msg.user_id = root["userid"].asInt64();
-
-        if(root["timestamp"].isNull()) {
-            // 日志
-            return -4;
-        }
-        msg.timestamp = root["timestamp"].asUInt64();
-
-        if(root["username"].isNull()) {
-            // 日志
-            return -4;
-        }
-        msg.username = root["username"].asString();
-
-        msgs.messages.push_back(msg);
-    }
-
-    return 0;
-}
-
-struct GerHistoryMessageAwaiter {
+struct GetHistoryMessageAwaiter {
 
     using streamMsg = std::pair<std::string, std::unordered_map<std::string, std::string>>;
 
@@ -353,7 +145,6 @@ struct GerHistoryMessageAwaiter {
     std::string roomid_;
     std::unordered_map<std::string, std::string> cursors_;
     int messagecount_;
-    // std::vector<streamMsg> messages_;
     MessageBatch messages_;
 
     bool await_ready() const noexcept { return false; }
@@ -365,15 +156,28 @@ struct GerHistoryMessageAwaiter {
             std::string stream_ref = last_message_id.empty() ? "+" : "(" + last_message_id;
     
             std::vector<streamMsg> messages;
+            std::string messageKey = "{" + this->roomid_ + "}";
 
-            this->redis_->xrevrange(this->roomid_, stream_ref, "-", get_count, std::back_inserter(messages));
+            this->redis_->xrevrange(messageKey, stream_ref, "-", get_count, std::back_inserter(messages));
             if(!messages.empty()) this->redis_->hset(this->userid_, this->roomid_, messages.back().first);
     
             for(const auto& msg : messages) {
-                int ret = fillMessageBatch(msg, this->messages_);
-                if(ret < 0) {
-                    handle.resume();
-                    return;
+
+                for(auto it = msg.second.begin(); it != msg.second.end(); ++it) {
+                    
+                    auto rootMsg = ChatApp::GetRootMessage(it->second.data());
+                    auto payload = rootMsg->payload_as_ServerMessagePayload();
+                    for(const auto& serverMsg : *payload->messages()) {
+                        Message message;
+                        message.id = msg.first;
+
+                        message.content = serverMsg->content()->c_str();
+                        message.timestamp = serverMsg->timestamp();
+                        message.user_id = serverMsg->user()->userid();
+                        message.username = serverMsg->user()->username()->c_str();
+
+                        this->messages_.messages.emplace_back(std::move(message));
+                    }
                 }
             }
 
@@ -388,104 +192,12 @@ struct GerHistoryMessageAwaiter {
 
 };
 
-struct MakeRequestMessageAwaiter {
-
-    ComputeThreadPool* threadpool_;
-    Json::Value* root_;
-    std::string roomname_;
-    MessageBatch msgs_;
-    std::string websocketStr_;
-
-    bool await_ready() const noexcept { return false; }
-    void await_suspend(std::coroutine_handle<> handle) {
-        this->threadpool_->submit([this, handle] () {
-            Json::Value root = *this->root_;
-            if(root["payload"].isNull()) {
-                // 日志
-                handle.resume();
-                return;
-            }
-            Json::Value payload = root["payload"];
-
-            if(payload["roomId"].isNull()) {
-                // 日志
-                handle.resume();
-                return;
-            }
-            std::string roomId = payload["roomId"].asString();
-
-            if(payload["firstMessageId"].isNull()) {
-                // 日志
-                handle.resume();
-                return;
-            }
-            std::string firstMessageId = payload["firstMessageId"].asString();
-
-            if(payload["count"].isNull()) {
-                // 日志
-                handle.resume();
-                return;
-            }
-            int count = payload["count"].asInt();
-
-            root = Json::Value{};
-            payload = Json::Value{};
-            Json::Value messages;
-            root["type"] = "RequestMessage";
-            payload["roomId"] = roomId;
-            payload["roomname"] = roomname_;
-            payload["hasMoreMessages"] = msgs_.has_more;
-
-            for(const auto& message : msgs_.messages) {
-                Json::Value user;
-                Json::Value Msg;
-
-                Msg["id"] = message.id;
-                Msg["content"] = message.content;
-                user["userid"] = message.user_id;
-                user["username"] = message.username;
-                Msg["user"] = user;
-                Msg["timestamp"] = message.timestamp;
-                messages.append(Msg);
-            }
-
-            if(!messages.empty()) payload["message"] = messages;
-            else payload["message"] = Json::arrayValue;
-
-            root["payload"] = payload;
-            Json::FastWriter writer;
-            std::string resJson = writer.write(root);
-
-            this->websocketStr_ = buildWebSocketFrame(resJson);
-
-            handle.resume();
-        });
-    }
-
-    std::string await_resume() { return this->websocketStr_; }
-
-};
-
 QueryAwaiter async_query_for_coro(MySQLConnPool* pool, const std::string& sql, SQLOperation::SQLType type) {
     return QueryAwaiter{pool, sql, type, {}};
 }
 
 UpdateAwaiter async_update_for_coro(MySQLConnPool* pool, const std::string& sql, SQLOperation::SQLType type) {
     return UpdateAwaiter{pool, sql, type, ""};
-}
-
-RedisXaddAwaiter async_redisXadd_for_coro(sw::redis::Redis* redis, std::vector<Message>& messages, 
-const std::string& roomid, ComputeThreadPool* threadpool){
-    return RedisXaddAwaiter{redis, messages, roomid, threadpool};
-}
-
-ParseClientJsonAwaiter async_parseclientjson_for_coro(Json::Value* root, std::vector<Message>* messages, 
-int32_t& userid, const std::string& username, ComputeThreadPool* threadpool) {
-    return ParseClientJsonAwaiter{root, messages, userid, username, threadpool, ""};
-}
-
-fillServerJsonAwaiter async_fillserverjson_for_coro(ComputeThreadPool* threadpool, std::vector<Message>* messages, std::string& roomid) {
-    return fillServerJsonAwaiter{threadpool, messages, roomid, ""};
 }
 
 clearCursorsAwaiter async_clearCursors_for_coro(sw::redis::Redis* redis, ComputeThreadPool* threadpool, int32_t& userid) {
@@ -501,14 +213,9 @@ GetUserCursors async_GetUserCursors_for_coro(ComputeThreadPool* threadpool, sw::
     return GetUserCursors(threadpool, redis, userid, {});
 }
 
-GerHistoryMessageAwaiter async_GerHistoryMessage_for_coro(ComputeThreadPool* threadpool, sw::redis::Redis* redis, const std::string& userid, 
+GetHistoryMessageAwaiter async_GerHistoryMessage_for_coro(ComputeThreadPool* threadpool, sw::redis::Redis* redis, const std::string& userid, 
 const std::string& roomid, std::unordered_map<std::string, std::string>& cursors, int messagecount) {
-    return GerHistoryMessageAwaiter{threadpool, redis, userid, roomid, cursors, messagecount, {}};
-}
-
-MakeRequestMessageAwaiter async_MakeRequestMessage_for_coro(ComputeThreadPool* threadpool, Json::Value* root, const std::string& roomname,
-const MessageBatch& messages) {
-    return MakeRequestMessageAwaiter{threadpool, root, roomname, messages, ""};
+    return GetHistoryMessageAwaiter{threadpool, redis, userid, roomid, cursors, messagecount, {}};
 }
 
 DetachedTask LogicGrpcServer::DoinitialPullMessage(grpc::ServerUnaryReactor* reatcor, const logic::pullMessageRequest* request, 
@@ -604,7 +311,7 @@ DetachedTask LogicGrpcServer::DoinitialPullMessage(grpc::ServerUnaryReactor* rea
     uint8_t* data = builder.GetBufferPointer();
     int size = builder.GetSize();
 
-    response->set_message(buildWebSocketFrame(std::string(reinterpret_cast<const char*>(data), size), 0x02));
+    response->set_message(std::string(reinterpret_cast<const char*>(data), size));
 
     reatcor->Finish(grpc::Status::OK);
 }
@@ -632,49 +339,84 @@ grpc::ServerUnaryReactor* LogicGrpcServer::clientMessage(grpc::CallbackServerCon
 DetachedTask LogicGrpcServer::DoclientMessage(grpc::ServerUnaryReactor* reactor, const logic::clientMessageRequest* request, 
     logic::clientMessageResponse* response) {
 
-    Json::Value root;
-    Json::Reader reader;
+    auto rootMsg = ChatApp::GetRootMessage(request->message().data());
 
-    if(!reader.parse(request->message(), root) || root["type"].isNull()) {
-        reactor->Finish(grpc::Status::OK);
-        co_return;
-    }
+    switch(rootMsg->payload_type()) {
+        case ChatApp::AnyPayload_PullMissingMessagePayload: {
+            auto payload = rootMsg->payload_as_PullMissingMessagePayload();
 
-    std::string type = root["type"].asString();
 
-    if(type == "PullMissingMessages") {
+            co_return;
+        }
 
-        reactor->Finish(grpc::Status::OK);
-        co_return;
+        case ChatApp::AnyPayload_RequestRoomHistoryPayload: {
+            auto payload = rootMsg->payload_as_RequestRoomHistoryPayload();
 
-    } else if(type == "RequestRoomHistory") {
-        int32_t userid = request->userid();
-        std::string useridStr = std::to_string(userid);
-        std::string username = request->username();
+            int32_t userid = request->userid();
+            std::string useridStr = std::to_string(userid);
+            std::string username{request->username()};
+            std::string_view room_id{payload->room_id()->c_str(), payload->room_id()->size()};
+            std::string_view first_message_id{payload->first_message_id()->c_str(), payload->first_message_id()->size()};
+            int PullMsgCount = payload->count();
+            
+            std::unordered_map<std::string, std::string> cursors = co_await async_GetUserCursors_for_coro(this->thread_pool_,
+            this->redis_pool_, useridStr);
 
-        std::string roomid = root["payload"]["roomId"].asString();
+            MessageBatch msgs = co_await async_GerHistoryMessage_for_coro(this->thread_pool_, this->redis_pool_,
+            useridStr, room_id.data(), cursors, 10);
 
-        std::unordered_map<std::string, std::string> roomlist;
+            thread_local flatbuffers::FlatBufferBuilder builder(4096);
+            builder.Clear();
 
-        bool ok = co_await async_getRoomList_for_coro(userid, &roomlist, this->thread_pool_);
-        
-        std::unordered_map<std::string, std::string> cursors = co_await async_GetUserCursors_for_coro(this->thread_pool_,
-        this->redis_pool_, useridStr);
+            std::vector<flatbuffers::Offset<ChatApp::RequestMessageItem>> requestMsgItemOffsets;
 
-        MessageBatch msgs = co_await async_GerHistoryMessage_for_coro(this->thread_pool_, this->redis_pool_,
-        useridStr, roomid, cursors, 10);            
-        
-        std::string RequestMessage = co_await async_MakeRequestMessage_for_coro(this->thread_pool_, &root, 
-        roomlist[roomid], msgs);
+            for(const auto& msg : msgs.messages) {
+                auto username_str = builder.CreateString(msg.username);
+                auto msg_id_str = builder.CreateString(msg.id);
+                auto content_str = builder.CreateString(msg.content);
 
-        response->set_ok(true);
-        response->set_message(RequestMessage);
+                ChatApp::UserBuilder Userbuilder(builder);
+                Userbuilder.add_userid(msg.user_id);
+                Userbuilder.add_username(username_str);
+                auto UserOffset = Userbuilder.Finish();
 
-        reactor->Finish(grpc::Status::OK);
-        co_return;
+                ChatApp::RequestMessageItemBuilder requestMsgBuilder(builder);
+                requestMsgBuilder.add_user(UserOffset);
+                requestMsgBuilder.add_content(content_str);
+                requestMsgBuilder.add_id(msg_id_str);
+                requestMsgBuilder.add_timestamp(msg.timestamp);
+                auto requestMsgOffset = requestMsgBuilder.Finish();
 
-    } else if(type == "clientCreateRoom") {
+                requestMsgItemOffsets.push_back(requestMsgOffset);
+            }
 
+            auto requestMsgItemOffset = builder.CreateVector(requestMsgItemOffsets);
+            auto roomid_str = builder.CreateString(room_id.data());
+            auto roomname_str = builder.CreateString(username.data());
+
+            ChatApp::RequestMessagePayloadBuilder requestMsgPayloadBuilder(builder);
+            requestMsgPayloadBuilder.add_messages(requestMsgItemOffset);
+            requestMsgPayloadBuilder.add_has_more_messages(msgs.has_more);
+            requestMsgPayloadBuilder.add_room_id(roomid_str);
+            requestMsgPayloadBuilder.add_roomname(roomname_str);
+            auto requestMsgPayloadOffset = requestMsgPayloadBuilder.Finish();
+
+            ChatApp::RootMessageBuilder rootMsgBuilder(builder);
+            rootMsgBuilder.add_payload_type(ChatApp::AnyPayload_RequestMessagePayload);
+            rootMsgBuilder.add_payload(requestMsgPayloadOffset.Union());
+            auto rootMsgOffset = rootMsgBuilder.Finish();
+
+            builder.Finish(rootMsgOffset);
+
+            uint8_t* data = builder.GetBufferPointer();
+            int size = builder.GetSize();
+
+            response->set_ok(true);
+            response->set_message(std::string(reinterpret_cast<const char*>(data), size));
+
+            reactor->Finish(grpc::Status::OK);
+            co_return;
+        }
     }
 
     reactor->Finish(grpc::Status::OK);

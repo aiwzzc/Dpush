@@ -1,6 +1,5 @@
 #include "KafkaConsumer.h"
 #include <iostream>
-#include <jsoncpp/json/json.h>
 
 #include "../base/coroutineTask.h"
 #include "../base/typeCommon.h"
@@ -78,6 +77,8 @@ void KafkaConsumer::start_consuming() {
 }
 
 void KafkaConsumer::start() {
+    this->lua_sha1_ = this->redis_pool_->script_load(KafkaConsumer::lua_script);
+
     this->loopthread_ = std::thread([this] {
         this->start_consuming();
     });
@@ -90,91 +91,38 @@ static uint64_t getCurrentTimestamp() {
     return milliseconds.count(); //单位是毫秒
 }
 
-static std::string SerializeMessageToJson(const Message& msg) {
-    Json::Value root;
-    root["content"] = msg.content;
-    root["userid"] = msg.user_id;
-    root["timestamp"] = msg.timestamp;
-    root["username"] = msg.username;
-    return root.toStyledString();
-}
+std::string SerializeMessageToFlatBuffer(const Message& msg) {
+    thread_local flatbuffers::FlatBufferBuilder builder(512);
 
-std::vector<std::pair<Message, long long>> redisXadd(sw::redis::Redis* redis, std::vector<Message>& messages, 
-    const std::string& roomid, ComputeThreadPool* threadpool) {
+    auto content = builder.CreateString(msg.content);
+    auto username = builder.CreateString(msg.username);
 
-    std::vector<std::pair<Message, long long>> messages_Ids;
+    ChatApp::StreamMessagePayloadBuilder StreamMsgBulder(builder);
+    StreamMsgBulder.add_content(content);
+    StreamMsgBulder.add_timestamp(msg.timestamp);
+    StreamMsgBulder.add_userid(msg.user_id);
+    StreamMsgBulder.add_username(username);
+    auto StreamMsgOffset = StreamMsgBulder.Finish();
 
-    for(auto& message : messages) {
-        long long msgid = redis->incr("room_seq:" + roomid);
-        messages_Ids.emplace_back(message, msgid);
+    ChatApp::RootMessageBuilder rootMsgBuilder(builder);
+    rootMsgBuilder.add_payload_type(ChatApp::AnyPayload_StreamMessagePayload);
+    rootMsgBuilder.add_payload(StreamMsgOffset.Union());
+    auto rootMsgOffset = rootMsgBuilder.Finish();
 
-        std::string msg_json = SerializeMessageToJson(message);
-        std::vector<std::pair<std::string, std::string>> fields{{"payload", msg_json}};
+    builder.Finish(rootMsgOffset);
 
-        message.id = redis->xadd(roomid, std::to_string(msgid) + "-0", fields.begin(), fields.end(), 500);
-    }
-
-    return messages_Ids;
-}
-
-bool redisSaddclientMessageId(sw::redis::Redis* redis, const std::string& roomid, const std::string& clientMessageId) {
-    std::string key = "clientMessageIds:" + roomid;
-    bool is_new = redis->sadd(key, clientMessageId);
-
-    if(is_new) redis->expire(key, std::chrono::seconds(3600));
-    
-    return is_new;
-}
-
-static std::string buildWebSocketFrame(const std::string& payload, uint8_t opcode = 0x01) {
-    std::string frame;
-
-    frame.push_back(0x80 | (opcode & 0x0F));
-
-    size_t payload_length = payload.size();
-    if (payload_length <= 125) {
-        frame.push_back(static_cast<uint8_t>(payload_length));
-    } else if (payload_length <= 65535) {
-        frame.push_back(126);
-        frame.push_back(static_cast<uint8_t>((payload_length >> 8) & 0xFF));
-        frame.push_back(static_cast<uint8_t>(payload_length & 0xFF));
-    } else {
-        frame.push_back(127);
-        for (int i = 7; i >= 0; i--) {
-            frame.push_back(static_cast<uint8_t>((payload_length >> (8 * i)) & 0xFF));
-        }
-    }
-
-    frame += payload;
-
-    return frame;
+    return std::string(reinterpret_cast<const char*>(builder.GetBufferPointer()), builder.GetSize());
 }
 
 void KafkaConsumer::stop() { this->running_.store(false); }
 
 void KafkaConsumer::process_message(RdKafka::Message* message) {
     std::string roomid = message->key() ? *message->key() : "";
-    // std::string data(static_cast<const char*>(message->payload()), message->len());
     auto rootMsg = ChatApp::GetRootMessage(static_cast<const char*>(message->payload()));
-
-    flatbuffers::Verifier verifier((const uint8_t*)static_cast<const char*>(message->payload()), message->len());
-    if (!ChatApp::VerifyRootMessageBuffer(verifier)) return;
 
     auto payload = rootMsg->payload_as_ClientMessagePayload();
 
     std::string_view clientMessageId{payload->client_message_id()->c_str(), payload->client_message_id()->size()};
-
-    bool is_new = redisSaddclientMessageId(this->redis_pool_, roomid, clientMessageId.data());
-
-    // 应该通知网关重新发送ack
-    if(!is_new) {
-        std::vector<std::pair<Message, long long>> missMessages;
-
-        // std::string resMessage = fillserverjson(this->ComputeThreadPool_, missMessages, clientMessageId, roomid);
-
-        // this->redis_pool_->publish("room:" + roomid, resMessage);
-        return ;
-    }
 
     RdKafka::Headers* header = message->headers();
 
@@ -196,71 +144,84 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
         }
     }
 
-    std::vector<std::pair<Message, long long>> messages_Ids;
+    std::vector<std::string> keys{"client_msg_set:{" + roomid + "}", "room_seq:{" + roomid + "}"};
+    std::vector<std::string> args{std::string(clientMessageId.data(), clientMessageId.size()), 
+        std::to_string(payload->messages()->size())};
 
-    for(const auto& msg : *payload->messages()) {
-        Message message;
-        message.content = msg->content()->c_str();
-        message.user_id = userid;
-        message.username = std::move(username);
-        message.timestamp = getCurrentTimestamp();
-    
-        long long msgid = this->redis_pool_->incr("room_seq:" + roomid);
+    std::vector<long long> returned_msgids;
+    this->redis_pool_->evalsha(this->lua_sha1_, keys.begin(), keys.end(), args.begin(), args.end(), std::back_inserter(returned_msgids));
 
-        std::string msg_json = SerializeMessageToJson(message);
-        std::vector<std::pair<std::string, std::string>> fields{{"payload", msg_json}};
+    if(returned_msgids.empty()) {
+        std::vector<std::pair<Message, long long>> missMessages;
 
-        message.id = this->redis_pool_->xadd(roomid, std::to_string(msgid) + "-0", fields.begin(), fields.end(), 500);
-        messages_Ids.emplace_back(message, msgid);
+        // std::string resMessage = fillserverjson(this->ComputeThreadPool_, missMessages, clientMessageId, roomid);
+
+        // this->redis_pool_->publish("room:" + roomid, resMessage);
+        return ;
     }
 
     thread_local flatbuffers::FlatBufferBuilder builder(4096);
     builder.Clear();
 
-    std::vector<flatbuffers::Offset<ChatApp::ServerMessageItem>> ServerMessageItemOffsets;
+    int index{0};
 
-    for(const auto& msg : messages_Ids) {
-        auto user_name = builder.CreateString(msg.first.username);
+    std::vector<flatbuffers::Offset<ChatApp::ServerMessageItem>> serverMsgItemOffsets;
+
+    for(const auto& msg : *payload->messages()) {
+        auto username_flat = builder.CreateString(username);
 
         ChatApp::UserBuilder UserBuilder(builder);
-        UserBuilder.add_userid(msg.first.user_id);
-        UserBuilder.add_username(user_name);
-        auto Useroffset = UserBuilder.Finish();
+        UserBuilder.add_userid(userid);
+        UserBuilder.add_username(username_flat);
+        auto UserOffset = UserBuilder.Finish();
 
         auto client_message_id = builder.CreateString(clientMessageId.data());
-        auto content = builder.CreateString(msg.first.content);
+        auto content_flat = builder.CreateString(msg->content()->c_str());
 
-        ChatApp::ServerMessageItemBuilder serverMessageItemBuilder(builder);
-        serverMessageItemBuilder.add_client_message_id(client_message_id);
-        serverMessageItemBuilder.add_content(content);
-        serverMessageItemBuilder.add_server_message_id(msg.second);
-        serverMessageItemBuilder.add_timestamp(msg.first.timestamp);
-        serverMessageItemBuilder.add_user(Useroffset);
-        auto ServerMsgOffset = serverMessageItemBuilder.Finish();
-
-        ServerMessageItemOffsets.push_back(ServerMsgOffset);
+        ChatApp::ServerMessageItemBuilder serverMsgItemBuilder(builder);
+        serverMsgItemBuilder.add_user(UserOffset);
+        serverMsgItemBuilder.add_content(content_flat);
+        serverMsgItemBuilder.add_server_message_id(returned_msgids[index++]);
+        serverMsgItemBuilder.add_client_message_id(client_message_id);
+        serverMsgItemBuilder.add_timestamp(getCurrentTimestamp());
+        
+        serverMsgItemOffsets.push_back(serverMsgItemBuilder.Finish());
     }
 
-    auto serverMsg_vector = builder.CreateVector(ServerMessageItemOffsets);
-    auto room_id = builder.CreateString(roomid);
+    auto serverMsg_vector = builder.CreateVector(serverMsgItemOffsets);
+    auto room_id_flat = builder.CreateString(roomid);
 
-    ChatApp::ServerMessagePayloadBuilder serverMessagePayloadBuilder(builder);
-    serverMessagePayloadBuilder.add_room_id(room_id);
-    serverMessagePayloadBuilder.add_messages(serverMsg_vector);
+    ChatApp::ServerMessagePayloadBuilder serverMsgPayloadBuilder(builder);
+    serverMsgPayloadBuilder.add_room_id(room_id_flat);
+    serverMsgPayloadBuilder.add_messages(serverMsg_vector);
+    auto serverMsgOffset = serverMsgPayloadBuilder.Finish();
 
-    auto serverMsgOffset = serverMessagePayloadBuilder.Finish();
+    ChatApp::RootMessageBuilder rootMsgBuilder(builder);
+    rootMsgBuilder.add_payload_type(ChatApp::AnyPayload_ServerMessagePayload);
+    rootMsgBuilder.add_payload(serverMsgOffset.Union());
+    builder.Finish(rootMsgBuilder.Finish());
 
-    ChatApp::RootMessageBuilder rootBuilder(builder);
-    rootBuilder.add_payload_type(ChatApp::AnyPayload_ServerMessagePayload);
-    rootBuilder.add_payload(serverMsgOffset.Union());
-    auto rootMsgOffset = rootBuilder.Finish();
+    const char* fb_data = reinterpret_cast<const char*>(builder.GetBufferPointer());
+    size_t fb_size = builder.GetSize();
+    std::string_view fb_binary(fb_data, fb_size);
 
-    builder.Finish(rootMsgOffset);
+    try{
+        auto pipe = this->redis_pool_->pipeline();
 
-    uint8_t* data = builder.GetBufferPointer();
-    int size = builder.GetSize();
+        std::vector<std::pair<std::string, std::string_view>> stream_fields{
+            {"payload", fb_binary}
+        };
 
-    this->redis_pool_->publish("room:" + roomid, buildWebSocketFrame(std::string(reinterpret_cast<const char*>(data), size), 0x02));
+        pipe.xadd("{" + roomid + "}", "*", stream_fields.begin(), stream_fields.end(), 500);
+
+        pipe.publish("room:" + roomid, fb_binary);
+
+        pipe.exec();
+
+    } catch(const sw::redis::Error& e) {
+        std::cerr << "Redis Pipeline 执行失败: " << e.what() << std::endl;
+        return;
+    }
 
     RdKafka::Error* err = message->offset_store();
 

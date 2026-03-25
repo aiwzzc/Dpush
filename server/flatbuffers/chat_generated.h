@@ -54,6 +54,9 @@ struct MessageAckPayloadBuilder;
 struct HelloMessagePayload;
 struct HelloMessagePayloadBuilder;
 
+struct StreamMessagePayload;
+struct StreamMessagePayloadBuilder;
+
 struct RootMessage;
 struct RootMessageBuilder;
 
@@ -102,11 +105,12 @@ enum AnyPayload : uint8_t {
   AnyPayload_RequestMessagePayload = 5,
   AnyPayload_PullMissingMessagePayload = 6,
   AnyPayload_MessageAckPayload = 7,
+  AnyPayload_StreamMessagePayload = 8,
   AnyPayload_MIN = AnyPayload_NONE,
-  AnyPayload_MAX = AnyPayload_MessageAckPayload
+  AnyPayload_MAX = AnyPayload_StreamMessagePayload
 };
 
-inline const AnyPayload (&EnumValuesAnyPayload())[8] {
+inline const AnyPayload (&EnumValuesAnyPayload())[9] {
   static const AnyPayload values[] = {
     AnyPayload_NONE,
     AnyPayload_HelloMessagePayload,
@@ -115,13 +119,14 @@ inline const AnyPayload (&EnumValuesAnyPayload())[8] {
     AnyPayload_RequestRoomHistoryPayload,
     AnyPayload_RequestMessagePayload,
     AnyPayload_PullMissingMessagePayload,
-    AnyPayload_MessageAckPayload
+    AnyPayload_MessageAckPayload,
+    AnyPayload_StreamMessagePayload
   };
   return values;
 }
 
 inline const char * const *EnumNamesAnyPayload() {
-  static const char * const names[9] = {
+  static const char * const names[10] = {
     "NONE",
     "HelloMessagePayload",
     "ClientMessagePayload",
@@ -130,13 +135,14 @@ inline const char * const *EnumNamesAnyPayload() {
     "RequestMessagePayload",
     "PullMissingMessagePayload",
     "MessageAckPayload",
+    "StreamMessagePayload",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameAnyPayload(AnyPayload e) {
-  if (flatbuffers::IsOutRange(e, AnyPayload_NONE, AnyPayload_MessageAckPayload)) return "";
+  if (flatbuffers::IsOutRange(e, AnyPayload_NONE, AnyPayload_StreamMessagePayload)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesAnyPayload()[index];
 }
@@ -171,6 +177,10 @@ template<> struct AnyPayloadTraits<ChatApp::PullMissingMessagePayload> {
 
 template<> struct AnyPayloadTraits<ChatApp::MessageAckPayload> {
   static const AnyPayload enum_value = AnyPayload_MessageAckPayload;
+};
+
+template<> struct AnyPayloadTraits<ChatApp::StreamMessagePayload> {
+  static const AnyPayload enum_value = AnyPayload_StreamMessagePayload;
 };
 
 bool VerifyAnyPayload(flatbuffers::Verifier &verifier, const void *obj, AnyPayload type);
@@ -1186,6 +1196,95 @@ inline flatbuffers::Offset<HelloMessagePayload> CreateHelloMessagePayloadDirect(
       rooms__);
 }
 
+struct StreamMessagePayload FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef StreamMessagePayloadBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_CONTENT = 4,
+    VT_USERID = 6,
+    VT_USERNAME = 8,
+    VT_TIMESTAMP = 10
+  };
+  const flatbuffers::String *content() const {
+    return GetPointer<const flatbuffers::String *>(VT_CONTENT);
+  }
+  int64_t userid() const {
+    return GetField<int64_t>(VT_USERID, 0);
+  }
+  const flatbuffers::String *username() const {
+    return GetPointer<const flatbuffers::String *>(VT_USERNAME);
+  }
+  int64_t timestamp() const {
+    return GetField<int64_t>(VT_TIMESTAMP, 0);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_CONTENT) &&
+           verifier.VerifyString(content()) &&
+           VerifyField<int64_t>(verifier, VT_USERID, 8) &&
+           VerifyOffset(verifier, VT_USERNAME) &&
+           verifier.VerifyString(username()) &&
+           VerifyField<int64_t>(verifier, VT_TIMESTAMP, 8) &&
+           verifier.EndTable();
+  }
+};
+
+struct StreamMessagePayloadBuilder {
+  typedef StreamMessagePayload Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_content(flatbuffers::Offset<flatbuffers::String> content) {
+    fbb_.AddOffset(StreamMessagePayload::VT_CONTENT, content);
+  }
+  void add_userid(int64_t userid) {
+    fbb_.AddElement<int64_t>(StreamMessagePayload::VT_USERID, userid, 0);
+  }
+  void add_username(flatbuffers::Offset<flatbuffers::String> username) {
+    fbb_.AddOffset(StreamMessagePayload::VT_USERNAME, username);
+  }
+  void add_timestamp(int64_t timestamp) {
+    fbb_.AddElement<int64_t>(StreamMessagePayload::VT_TIMESTAMP, timestamp, 0);
+  }
+  explicit StreamMessagePayloadBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  flatbuffers::Offset<StreamMessagePayload> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<StreamMessagePayload>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<StreamMessagePayload> CreateStreamMessagePayload(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    flatbuffers::Offset<flatbuffers::String> content = 0,
+    int64_t userid = 0,
+    flatbuffers::Offset<flatbuffers::String> username = 0,
+    int64_t timestamp = 0) {
+  StreamMessagePayloadBuilder builder_(_fbb);
+  builder_.add_timestamp(timestamp);
+  builder_.add_userid(userid);
+  builder_.add_username(username);
+  builder_.add_content(content);
+  return builder_.Finish();
+}
+
+inline flatbuffers::Offset<StreamMessagePayload> CreateStreamMessagePayloadDirect(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    const char *content = nullptr,
+    int64_t userid = 0,
+    const char *username = nullptr,
+    int64_t timestamp = 0) {
+  auto content__ = content ? _fbb.CreateString(content) : 0;
+  auto username__ = username ? _fbb.CreateString(username) : 0;
+  return ChatApp::CreateStreamMessagePayload(
+      _fbb,
+      content__,
+      userid,
+      username__,
+      timestamp);
+}
+
 struct RootMessage FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   typedef RootMessageBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -1219,6 +1318,9 @@ struct RootMessage FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   }
   const ChatApp::MessageAckPayload *payload_as_MessageAckPayload() const {
     return payload_type() == ChatApp::AnyPayload_MessageAckPayload ? static_cast<const ChatApp::MessageAckPayload *>(payload()) : nullptr;
+  }
+  const ChatApp::StreamMessagePayload *payload_as_StreamMessagePayload() const {
+    return payload_type() == ChatApp::AnyPayload_StreamMessagePayload ? static_cast<const ChatApp::StreamMessagePayload *>(payload()) : nullptr;
   }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -1255,6 +1357,10 @@ template<> inline const ChatApp::PullMissingMessagePayload *RootMessage::payload
 
 template<> inline const ChatApp::MessageAckPayload *RootMessage::payload_as<ChatApp::MessageAckPayload>() const {
   return payload_as_MessageAckPayload();
+}
+
+template<> inline const ChatApp::StreamMessagePayload *RootMessage::payload_as<ChatApp::StreamMessagePayload>() const {
+  return payload_as_StreamMessagePayload();
 }
 
 struct RootMessageBuilder {
@@ -1319,6 +1425,10 @@ inline bool VerifyAnyPayload(flatbuffers::Verifier &verifier, const void *obj, A
     }
     case AnyPayload_MessageAckPayload: {
       auto ptr = reinterpret_cast<const ChatApp::MessageAckPayload *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case AnyPayload_StreamMessagePayload: {
+      auto ptr = reinterpret_cast<const ChatApp::StreamMessagePayload *>(obj);
       return verifier.VerifyTable(ptr);
     }
     default: return true;

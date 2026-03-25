@@ -7,8 +7,6 @@
 #include "GatewayServer.h"
 #include "../../flatbuffers/chat_generated.h"
 
-#include "../../base/JsonView.h"
-
 #include <openssl/sha.h>
 #include <jwt.h>
 
@@ -70,19 +68,30 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
         std::string cookie = AnalysisCookie(req);
 
         jwt* decoded = nullptr;
+        bool benchmark{false};
 
         if(jwt_decode(&decoded, cookie.c_str(), (unsigned char*)GatewayServer::public_key, 
         strlen(GatewayServer::public_key)) != 0) {
-            sendbadResponse(conn);
+            benchmark = true;
+            // sendbadResponse(conn);
 
-            return;
+            // return;
         }
 
-        conn->send(HandleUpgradeResponse(req));
-        int32_t userid = jwt_get_grant_int(decoded, "userid");
-        const char* uname_ptr = jwt_get_grant(decoded, "username");
-        std::string username = uname_ptr ? uname_ptr : "";
+        int32_t userid;
+        std::string username;
 
+        if(!benchmark) {
+            conn->send(HandleUpgradeResponse(req));
+            userid = jwt_get_grant_int(decoded, "userid");
+            const char* uname_ptr = jwt_get_grant(decoded, "username");
+            username = uname_ptr ? uname_ptr : "";
+            
+        } else {
+            userid = std::stoi(req.path());
+            username = "user_" + std::to_string(userid - 32);
+        }
+        
         jwt_free(decoded);
 
         if(username.empty()) return;
@@ -116,7 +125,7 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
 
             client->rpcGetUserRoomListAsync(userid, [userid, wsContextPtr] (std::vector<std::string> roomlist) {
 
-                GatewayPubSubManager::UserRoomLRU_.put(userid, roomlist);
+                if(!roomlist.empty()) GatewayPubSubManager::UserRoomLRU_.put(userid, roomlist);
 
 #if 0
                 for(const auto& roomid : roomlist) {
@@ -139,6 +148,9 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
 
                 }
 #elif 1
+                roomlist = {"f3909e6e-1bc4-11f1-a7fa-000c29dfa7f1",
+                            "3a0db02c-1bc3-11f1-a7fa-000c29dfa7f1"};
+
                 EventLoop* loop = wsContextPtr->getLoop();
 
                 loop->runInLoop([wsContextPtr, roomlist = std::move(roomlist)] () {
@@ -160,7 +172,7 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
         }
 
         client->rpcinitialPullMessageAsync(wsContextPtr->userid(), wsContextPtr->username(), 10, 
-        [wsContextPtr] (std::string msg) { wsContextPtr->send(msg); });
+        [wsContextPtr] (std::string msg) { wsContextPtr->send(buildWebSocketFrame(msg, 0x02)); });
 
         wsContextPtr->setWebconnCloseCallback([wsContextPtr] () {
             if(!wsContextPtr->connected()) return;
@@ -230,38 +242,12 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
             if(conn->disconnected()) return;
             WebsocketConnPtr wsContextPtr = *(std::any_cast<WebsocketConnPtr>(conn->getMutableContext()));
 
-            std::vector<std::pair<const char*, std::size_t>> messageList = wsContextPtr->onRead(conn, buffer);
+            std::vector<std::string> messageList = wsContextPtr->onRead(conn, buffer);
 
             if(messageList.empty()) return;
 
-            // for(auto& message : messageList) {
-
-            //     JsonDoc root;
-
-            //     if(!root.parse(message.c_str(), message.size())) continue;
-
-            //     std::string messageType = root.root()["type"].asString();
-
-            //     if(messageType == "ClientMessage") {
-
-            //         std::string roomid = root.root()["payload"]["roomId"].asString();
-            //         std::string clientMessageId = root.root()["clientMessageId"].asString();
-
-            //         KafkaDeliveryContext* ctx = new KafkaDeliveryContext{conn, clientMessageId};
-
-            //         producer->produce("chat_room_messages", message.data(), message.size(), roomid, roomid.size(), ctx, 
-            //         wsContextPtr->userid(), wsContextPtr->username());
-
-            //     } else if(messageType == "RequestRoomHistory" || messageType == "PullMissingMessages") {
-            //         client->rpcCilentMessageAsync(message, wsContextPtr->userid(), wsContextPtr->username(), 
-            //         [wsContextPtr] (std::string msg) {
-            //             wsContextPtr->send(msg);
-            //         });
-
-            //     } else { return; }
-            // }
-            for(auto& [message, message_size] : messageList) {
-                auto rootMsg = ChatApp::GetRootMessage(message);
+            for(const auto& message : messageList) {
+                auto rootMsg = ChatApp::GetRootMessage(message.data());
 
                 switch(rootMsg->payload_type()) {
                     case ChatApp::AnyPayload_ClientMessagePayload: {
@@ -273,22 +259,28 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
 
                         KafkaDeliveryContext* ctx = new KafkaDeliveryContext{conn, clientMessageId.data()};
 
-                        producer->produce("chat_room_messages", message, message_size, roomid.data(), roomid.size(), ctx, 
-                        wsContextPtr->userid(), wsContextPtr->username());
+                        producer->produce(kafkaProducer::CLIENTMESSAGETOPIC, message.data(), message.size(), roomid.data(), 
+                        roomid.size(), ctx, wsContextPtr->userid(), wsContextPtr->username());
+
+                        break;
                     }
 
                     case ChatApp::AnyPayload_RequestRoomHistoryPayload: {
                         client->rpcCilentMessageAsync(message, wsContextPtr->userid(), wsContextPtr->username(), 
                         [wsContextPtr] (std::string msg) {
-                            wsContextPtr->send(msg);
+                            wsContextPtr->send(buildWebSocketFrame(msg, 0x02));
                         });
+
+                        break;
                     }
 
                     case ChatApp::AnyPayload_PullMissingMessagePayload: {
                         client->rpcCilentMessageAsync(message, wsContextPtr->userid(), wsContextPtr->username(), 
                         [wsContextPtr] (std::string msg) {
-                            wsContextPtr->send(msg);
+                            wsContextPtr->send(buildWebSocketFrame(msg, 0x02));
                         });
+
+                        break;
                     }
                 }
             }

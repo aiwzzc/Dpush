@@ -1,52 +1,32 @@
 #include "producer.h"
-#include "../../base/JsonView.h"
+#include "../../flatbuffers/chat_generated.h"
 
 kafkaProducer::kafkaProducer() : my_dr_cb_(std::make_unique<MyDeliveryReportCb>()) { this->init_kafka(); }
 kafkaProducer::~kafkaProducer() = default;
 
-/*
-{
-  "type": "MessageAck",
-  "payload": {
-    "clientMessageId": "msg_1710000000000_a1b2c3d",
-    "status": "SUCCESS"
-  }
-}
-*/
-
-static std::string buildWebSocketFrame(const std::string& payload, uint8_t opcode = 0x01) {
-    std::string frame;
-
-    frame.push_back(0x80 | (opcode & 0x0F));
-
-    size_t payload_length = payload.size();
-    if (payload_length <= 125) {
-        frame.push_back(static_cast<uint8_t>(payload_length));
-    } else if (payload_length <= 65535) {
-        frame.push_back(126);
-        frame.push_back(static_cast<uint8_t>((payload_length >> 8) & 0xFF));
-        frame.push_back(static_cast<uint8_t>(payload_length & 0xFF));
-    } else {
-        frame.push_back(127);
-        for (int i = 7; i >= 0; i--) {
-            frame.push_back(static_cast<uint8_t>((payload_length >> (8 * i)) & 0xFF));
-        }
-    }
-
-    frame += payload;
-
-    return frame;
-}
-
 std::string packet_ack(const std::string& msg_id, const std::string& status) {
-    JsonDoc root;
+    thread_local flatbuffers::FlatBufferBuilder builder(512);
+    builder.Clear();
 
-    root.root()["type"].set("MessageAck");
-    auto payload = root.root()["payload"];
-    payload["clientMessageId"].set(msg_id);
-    payload["status"].set(status);
+    auto client_message_id_str = builder.CreateString(msg_id);
+    auto status_str = builder.CreateString(status);
 
-    return buildWebSocketFrame(root.toString());
+    ChatApp::MessageAckPayloadBuilder messageackOffsetbuilder(builder);
+    messageackOffsetbuilder.add_client_message_id(client_message_id_str);
+    messageackOffsetbuilder.add_status(status_str);
+    auto messageackOffset = messageackOffsetbuilder.Finish();
+
+    ChatApp::RootMessageBuilder rootMessagebuilder(builder);
+    rootMessagebuilder.add_payload_type(ChatApp::AnyPayload_MessageAckPayload);
+    rootMessagebuilder.add_payload(messageackOffset.Union());
+    auto rootMsgOffset = rootMessagebuilder.Finish();
+
+    builder.Finish(rootMsgOffset);
+
+    uint8_t* data = builder.GetBufferPointer();
+    int size = builder.GetSize();
+
+    return buildWebSocketFrame(std::string(reinterpret_cast<const char*>(data), size), 0x02);
 }
 
 class MyDeliveryReportCb : public RdKafka::DeliveryReportCb {
@@ -104,20 +84,6 @@ void kafkaProducer::init_kafka() {
 
     delete conf;
 }
-
-// RdKafka::ErrorCode kafkaProducer::produce(const std::string& topic, char* data, std::size_t data_len, 
-//     const std::string& key, std::size_t key_len, void* ctx, int32_t userid, std::string& username) {
-    
-//     RdKafka::Headers* header = RdKafka::Headers::create();
-
-//     header->add("userid", std::to_string(userid));
-//     header->add("username", username);
-
-//     RdKafka::ErrorCode err = this->producer_->produce(topic, RdKafka::Topic::PARTITION_UA, RdKafka::Producer::RK_MSG_COPY,
-//     const_cast<char*>(data), data_len, key.c_str(), key_len, 0, header, ctx);
-
-//     return err;
-// }
 
 RdKafka::ErrorCode kafkaProducer::produce(const std::string& topic, const char* data, std::size_t data_len, 
     const std::string& key, std::size_t key_len, void* ctx, int32_t userid, std::string& username) {
