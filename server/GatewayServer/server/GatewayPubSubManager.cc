@@ -10,7 +10,9 @@ std::array<RoomBucket, BUCKET_NUM> GatewayPubSubManager::roomBuckets{};
 
 // 无锁优化
 thread_local std::unordered_map<int32_t, WebsocketConnPtr> LocalWebsockConnhash;
-thread_local std::unordered_map<std::string, std::unordered_set<WebsocketConnPtr>> LocalWebsockConnRoomhash;
+thread_local std::unordered_map<std::string, std::vector<WebsocketConnPtr>> LocalWebsockConnRoomhash;
+
+thread_local std::unique_ptr<ThreadLocalUring> t_uring_ptr = nullptr;
 
 std::vector<std::string> GatewayPubSubManager::pending_sub_channels_{};
 std::vector<std::string> GatewayPubSubManager::pending_unsub_channels_{};
@@ -63,7 +65,7 @@ GatewayPubSubManager::GatewayPubSubManager() {
                 }
             });
         }
-#elif 1
+#elif 0
 
         for(EventLoop* loop : GatewayPubSubManager::all_io_loops_) {
             loop->runInLoop([roomid, shared_ws_frame] () {
@@ -78,6 +80,18 @@ GatewayPubSubManager::GatewayPubSubManager() {
                 }
             });
         }
+#elif 1
+        for(EventLoop* loop : GatewayPubSubManager::all_io_loops_) {
+            loop->runInLoop([roomid, shared_ws_frame] () {
+                auto it = LocalWebsockConnRoomhash.find(roomid);
+
+                if(it != LocalWebsockConnRoomhash.end()) {
+                    
+                    t_uring_ptr->broadcastInLoop(it->second, shared_ws_frame);
+                }
+            });
+        }
+    
 #endif
 
 #endif

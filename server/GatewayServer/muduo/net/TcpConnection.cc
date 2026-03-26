@@ -428,3 +428,5 @@ void TcpConnection::handleError()
   //           << "] - SO_ERROR = " << err << " " << strerror_tl(err);
 }
 
+int TcpConnection::fd() const
+{ return this->channel_->fd(); }

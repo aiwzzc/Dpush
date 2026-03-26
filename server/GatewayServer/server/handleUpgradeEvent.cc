@@ -114,7 +114,8 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
                     auto& conns = LocalWebsockConnRoomhash[roomid];
                     if(conns.empty()) needSubscribeToRedisPub = true;
 
-                    LocalWebsockConnRoomhash[roomid].insert(wsContextPtr);
+                    wsContextPtr->room_index_ = conns.size();
+                    conns.push_back(wsContextPtr);
                     if(needSubscribeToRedisPub) GatewayPubSubManager::SubscribeRoomSafe(roomid);
 
                     wsContextPtr->addRoom(roomid);
@@ -160,7 +161,8 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
                         auto& conns = LocalWebsockConnRoomhash[roomid];
                         if(conns.empty()) needSubscribeToRedisPub = true;
 
-                        LocalWebsockConnRoomhash[roomid].insert(wsContextPtr);
+                        wsContextPtr->room_index_ = conns.size();
+                        conns.push_back(wsContextPtr);
                         if(needSubscribeToRedisPub) GatewayPubSubManager::SubscribeRoomSafe(roomid);
 
                         wsContextPtr->addRoom(roomid);
@@ -207,14 +209,22 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
                     LocalWebsockConnhash.erase(userid);
                 }
 
-                std::unordered_set<std::string> myRooms = wsContextPtr->getjoinedRooms();
+                std::vector<std::string> myRooms = wsContextPtr->getjoinedRooms();
                 for(const auto& roomid : myRooms) {
                     auto it = LocalWebsockConnRoomhash.find(roomid);
+                    auto& conns = it->second;
 
                     if(it != LocalWebsockConnRoomhash.end()) {
-                        it->second.erase(wsContextPtr);
+                        int room_index = wsContextPtr->room_index_;
 
-                        if(it->second.empty()) {
+                        if(room_index >= 0 && room_index < conns.size()) {
+                            conns[room_index] = conns.back();
+                            conns[room_index]->room_index_ = room_index;
+                            conns.pop_back();
+                            wsContextPtr->room_index_ = -1;
+                        }
+
+                        if(conns.empty()) {
                             LocalWebsockConnRoomhash.erase(it);
                             GatewayPubSubManager::UnSubscribeRoomSafe(roomid);
                         }

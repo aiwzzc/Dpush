@@ -29,6 +29,8 @@ WebSocketFrame parseWebSocketFrame(const std::string& data);
 class WebsocketConn : public std::enable_shared_from_this<WebsocketConn> {
 
 public:
+    int room_index_ = -1;
+
     using WebconnCloseCallback = std::function<void()>;
 
     WebsocketConn(const TcpConnectionPtr&);
@@ -39,7 +41,7 @@ public:
     void setUserid(int32_t userid);
     void setUsername(const std::string&);
     void setWebconnCloseCallback(const WebconnCloseCallback& cb);
-    void setjoinedRooms(const std::unordered_set<std::string>& rooms);
+    void setjoinedRooms(const std::vector<std::string>& rooms);
 
     void send(const std::string&);
     void send(const char*, std::size_t);
@@ -54,7 +56,7 @@ public:
     std::string& username();
     int32_t userid() const;
     TcpConnectionPtr conn() const;
-    std::unordered_set<std::string> getjoinedRooms() const;
+    std::vector<std::string> getjoinedRooms() const;
 
 private:
     bool isCloseFrame();
@@ -64,7 +66,7 @@ private:
     std::string username_;
     WebconnCloseCallback webconnCloseCallback_;
 
-    std::unordered_set<std::string> joinedRooms_;
+    std::vector<std::string> joinedRooms_;
 };
 
 using WebsocketConnPtr = std::shared_ptr<WebsocketConn>;

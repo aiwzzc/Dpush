@@ -19,7 +19,7 @@ void WebsocketConn::setUserid(int32_t userid)
 void WebsocketConn::setUsername(const std::string& username) 
 { this->username_.assign(username); }
 
-void WebsocketConn::setjoinedRooms(const std::unordered_set<std::string>& rooms)
+void WebsocketConn::setjoinedRooms(const std::vector<std::string>& rooms)
 { this->joinedRooms_ = std::move(rooms); }
 
 std::string& WebsocketConn::username() 
@@ -34,10 +34,14 @@ EventLoop* WebsocketConn::getLoop() const
 void WebsocketConn::setWebconnCloseCallback(const WebconnCloseCallback& cb) 
 { this->webconnCloseCallback_ = std::move(cb); }
 
-void WebsocketConn::addRoom(const std::string& roomid)
-{ if(!this->joinedRooms_.contains(roomid)) this->joinedRooms_.insert(roomid); }
+void WebsocketConn::addRoom(const std::string& roomid) {
+    auto it = std::find(this->joinedRooms_.begin(), this->joinedRooms_.end(), roomid);
+    if(it == this->joinedRooms_.end()) {
+        this->joinedRooms_.push_back(roomid);
+    }
+}
 
-std::unordered_set<std::string> WebsocketConn::getjoinedRooms() const
+std::vector<std::string> WebsocketConn::getjoinedRooms() const
 { return this->joinedRooms_; }
 
 void WebsocketConn::sendCloseFrame(uint16_t code, const std::string reason) {

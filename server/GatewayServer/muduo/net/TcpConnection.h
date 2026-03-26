@@ -109,6 +109,8 @@ class TcpConnection : noncopyable,
   void setCloseCallback(const CloseCallback& cb)
   { closeCallback_ = cb; }
 
+  int fd() const;
+
   // called when TcpServer accepts a new connection
   void connectEstablished();   // should be called only once
   // called when TcpServer has removed me from its map

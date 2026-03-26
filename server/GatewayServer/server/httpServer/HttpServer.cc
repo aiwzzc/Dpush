@@ -71,9 +71,9 @@ HttpServer::HttpServer(uint16_t start_port, int port_count, const std::string& n
 
         server->setThreadNum(threads_per_server);
 
-        server->setThreadInitCallback([] (EventLoop* loop) {
-            GatewayPubSubManager::RegisterLoop(loop);
-        });
+        // server->setThreadInitCallback([] (EventLoop* loop) {
+        //     GatewayPubSubManager::RegisterLoop(loop);
+        // });
 
         this->servers_.emplace_back(std::move(server));
     }
@@ -107,9 +107,17 @@ void HttpServer::start() {
     this->loop_->loop(1000);
 }
 
-void HttpServer::setHttpCallback(const HttpCallback& cb) { this->httpCallback_ = std::move(cb); }
+void HttpServer::setHttpCallback(const HttpCallback& cb)
+{ this->httpCallback_ = std::move(cb); }
 
-void HttpServer::setUpgradeCallback(const UpgradeCallback& cb) { this->upgradeCallback_ = std::move(cb); }
+void HttpServer::setUpgradeCallback(const UpgradeCallback& cb)
+{ this->upgradeCallback_ = std::move(cb); }
+
+void HttpServer::setThreadInitCallback(const ThreadInitCallback& cb) {
+    for(auto& server : servers_) {
+        server->setThreadInitCallback(cb);
+    }
+}
 
 void HttpServer::onConnection(const TcpConnectionPtr& conn) {
     conn->setTcpNoDelay(true);

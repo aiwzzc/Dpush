@@ -70,4 +70,4 @@ private:
 };
 
 extern thread_local std::unordered_map<int32_t, WebsocketConnPtr> LocalWebsockConnhash;
-extern thread_local std::unordered_map<std::string, std::unordered_set<WebsocketConnPtr>> LocalWebsockConnRoomhash;
+extern thread_local std::unordered_map<std::string, std::vector<WebsocketConnPtr>> LocalWebsockConnRoomhash;
