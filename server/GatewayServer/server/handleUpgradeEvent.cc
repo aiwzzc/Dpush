@@ -12,7 +12,7 @@
 
 std::string AnalysisCookie(const HttpRequest& req) {
     if(!req.headers().contains("Cookie")) return "";
-    std::string cookieFields = req.getHeader("Cookie");
+    const std::string& cookieFields = *(req.getHeader("Cookie").value());
 
     std::stringstream ss(cookieFields);
     std::string item;
@@ -32,7 +32,7 @@ std::string AnalysisCookie(const HttpRequest& req) {
 }
 
 std::string HandleUpgradeResponse(const HttpRequest& req) {
-    std::string cli_websocket_key = req.getHeader("Sec-WebSocket-Key");
+    std::string cli_websocket_key = *(req.getHeader("Sec-WebSocket-Key").value());
     if(cli_websocket_key.empty()) return "HTTP/1.1 400 Bad Request\r\n\r\n";
     
     cli_websocket_key += "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -64,7 +64,7 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
 
     if(conn->disconnected()) return;
 
-    if(req.getHeader("Upgrade") == "websocket") {
+    if(*(req.getHeader("Upgrade").value()) == "websocket") {
         std::string cookie = AnalysisCookie(req);
 
         jwt* decoded = nullptr;

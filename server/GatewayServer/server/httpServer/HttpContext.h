@@ -1,7 +1,14 @@
 #pragma once
 
 #include "HttpRequest.h"
-#include <string>
+
+namespace muduo {
+
+namespace net {
+    class Buffer;
+};
+
+};
 
 class HttpContext {
 
@@ -16,7 +23,7 @@ public:
     HttpContext();
     ~HttpContext();
 
-    bool parseRequest(std::string& buf);
+    bool parseRequest(muduo::net::Buffer* buf);
     bool gotAll() const;
     void reset();
     const HttpRequest& request() const;

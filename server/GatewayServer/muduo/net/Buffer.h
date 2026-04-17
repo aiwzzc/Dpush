@@ -84,6 +84,42 @@ class Buffer : public muduo::copyable
     return crlf == beginWrite() ? NULL : crlf;
   }
 
+  const char* find(const char* start, size_t len) const
+  {
+    if (start == nullptr || len == 0) return nullptr;
+
+    const char* text = this->peek();
+    std::size_t text_len = this->readableBytes();
+
+    if(text_len < len) return nullptr;
+
+    std::vector<int> next(len, 0);
+
+    for (std::size_t i = 1, j = 0; i < len; ++i) {
+        while (j > 0 && start[i] != start[j]) {
+            j = next[j - 1];
+        }
+        if (start[i] == start[j]) {
+            ++j;
+        }
+        next[i] = j;
+    }
+
+    for (std::size_t i = 0, j = 0; i < text_len; ++i) {
+        while (j > 0 && text[i] != start[j]) {
+            j = next[j - 1];
+        }
+        if (text[i] == start[j]) {
+            ++j;
+        }
+        if (j == len) {
+            return text + i - len + 1;
+        }
+    }
+
+    return nullptr;
+  }
+
   const char* findCRLF(const char* start) const
   {
     assert(peek() <= start);

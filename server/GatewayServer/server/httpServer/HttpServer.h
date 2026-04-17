@@ -46,6 +46,16 @@
     "Content-Length:%d\r\n"                                                    \
     "Content-Type:application/json;charset=utf-8\r\n\r\n%s"
 
+namespace muduo {
+
+namespace net {
+
+class Buffer;
+
+};
+
+};
+
 class TcpConnection;
 
 using muduo::net::TcpConnectionPtr;
@@ -75,7 +85,7 @@ public:
 
 private:
     void onConnection(const TcpConnectionPtr& conn);
-    void onMessage(const TcpConnectionPtr& conn, std::string buf);
+    void onMessage(const TcpConnectionPtr& conn, muduo::net::Buffer* buf);
     void onRequest(const TcpConnectionPtr& conn, const HttpRequest& request);
     void defaultHttpCallback(const TcpConnectionPtr&, const HttpRequest&);
 

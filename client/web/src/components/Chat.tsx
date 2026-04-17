@@ -749,37 +749,37 @@ export function Chat({ user, onLogout }: ChatProps) {
 
   if (!currentRoom && rooms.length === 0) {
     return (
-      <div className="h-screen flex items-center justify-center bg-[#0B0F19] text-slate-300">
+      <div className="h-screen flex items-center justify-center bg-black text-zinc-400">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
-          <p>正在连接服务器并加载房间列表...</p>
+          <Loader2 className="w-8 h-8 animate-spin text-white" />
+          <p>Connecting to XChat...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="h-screen overflow-hidden flex bg-[#0B0F19] text-slate-300 selection:bg-indigo-500/30">
+    <div className="h-screen overflow-hidden flex bg-black text-zinc-300 selection:bg-zinc-800 font-sans">
       {/* Sidebar */}
-      <aside className="w-64 flex-shrink-0 bg-[#0B0F19] border-r border-white/5 flex flex-col">
+      <aside className="w-64 flex-shrink-0 bg-[#09090b] flex flex-col">
         {/* User Profile */}
-        <div className="p-4 border-b border-white/5 flex items-center justify-between">
+        <div className="p-6 flex items-center justify-between">
           <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold shadow-lg flex-shrink-0">
+            <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-white font-bold flex-shrink-0">
               {currentUser.username.charAt(0).toUpperCase()}
             </div>
             <div className="truncate">
               <h2 className="text-sm font-bold text-white truncate">{currentUser.username}</h2>
               <div className="flex items-center gap-1.5">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
-                <span className="text-xs text-slate-400">在线</span>
+                <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                <span className="text-xs text-zinc-500">Online</span>
               </div>
             </div>
           </div>
           <button 
             onClick={onLogout}
-            className="p-2 text-slate-400 hover:text-red-400 hover:bg-white/5 rounded-lg transition-colors"
-            title="退出登录"
+            className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-900 rounded-full transition-colors"
+            title="Sign out"
           >
             <LogOut size={18} />
           </button>
@@ -788,13 +788,13 @@ export function Chat({ user, onLogout }: ChatProps) {
         {/* Room List */}
         <div className="flex-1 overflow-y-auto py-4">
           <div className="px-4 mb-2 flex items-center justify-between group">
-            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">聊天频道</h3>
+            <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Channels</h3>
             <button 
               onClick={() => setShowCreateRoom(true)}
-              className="text-slate-400 hover:text-white p-1 rounded hover:bg-white/10 transition-colors opacity-0 group-hover:opacity-100"
-              title="创建频道"
+              className="text-zinc-500 hover:text-white p-1 rounded-full hover:bg-zinc-900 transition-colors opacity-0 group-hover:opacity-100"
+              title="Create Channel"
             >
-              <Plus size={14} />
+              <Plus size={16} />
             </button>
           </div>
           <div className="space-y-0.5 px-2">
@@ -802,14 +802,14 @@ export function Chat({ user, onLogout }: ChatProps) {
               <button
                 key={room.id}
                 onClick={() => setCurrentRoom(room)}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 ${
+                className={`w-full flex items-center gap-3 px-3 py-3 rounded-md transition-all duration-200 ${
                   currentRoom?.id === room.id 
-                    ? 'bg-indigo-500/10 text-indigo-400' 
-                    : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                    ? 'bg-zinc-900 text-white font-bold' 
+                    : 'text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200'
                 }`}
               >
-                <Hash size={18} className={currentRoom?.id === room.id ? 'text-indigo-400' : 'text-slate-500'} />
-                <span className="font-medium truncate">{room.name}</span>
+                <Hash size={18} className={currentRoom?.id === room.id ? 'text-white' : 'text-zinc-500'} />
+                <span className="truncate">{room.name}</span>
               </button>
             ))}
           </div>
@@ -817,17 +817,17 @@ export function Chat({ user, onLogout }: ChatProps) {
       </aside>
 
       {/* Main Chat Area */}
-      <main className="flex-1 flex flex-col bg-[#131825] relative">
+      <main className="flex-1 flex flex-col bg-black relative">
         {/* Room Header */}
-        <header className="h-16 border-b border-white/5 flex items-center px-6 bg-[#131825]/80 backdrop-blur-md sticky top-0 z-10">
+        <header className="h-20 flex items-center px-8 bg-gradient-to-b from-black via-black/90 to-transparent sticky top-0 z-10">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-slate-400">
-              <Hash size={20} />
+            <div className="w-8 h-8 rounded-full bg-zinc-900 flex items-center justify-center text-zinc-400">
+              <Hash size={18} />
             </div>
             <div>
               <h2 className="text-lg font-bold text-white">{currentRoom?.name}</h2>
               {currentRoom?.description && (
-                <p className="text-xs text-slate-400">{currentRoom.description}</p>
+                <p className="text-xs text-zinc-500">{currentRoom.description}</p>
               )}
             </div>
           </div>
@@ -835,112 +835,123 @@ export function Chat({ user, onLogout }: ChatProps) {
 
         {/* Messages */}
         <div 
-          className="flex-1 overflow-y-auto p-6 space-y-6"
+          className="flex-1 overflow-y-auto p-0 pb-36"
           ref={messageContainerRef}
           onScroll={handleScroll}
         >
           {isLoadingHistory && (
-            <div className="flex justify-center py-2">
-              <Loader2 className="w-5 h-5 animate-spin text-indigo-500" />
+            <div className="flex justify-center py-4 border-b border-zinc-800">
+              <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
             </div>
           )}
           {currentMessages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-500 space-y-4">
-              <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center">
-                <MessageSquare size={32} className="text-slate-600" />
+            <div className="h-full flex flex-col items-center justify-center text-zinc-500 space-y-6">
+              <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-zinc-800 to-zinc-900 flex items-center justify-center shadow-2xl border border-white/5">
+                <MessageSquare size={32} className="text-zinc-400" />
               </div>
-              <p>这里还很安静，发条消息打破沉默吧！</p>
+              <p className="text-lg tracking-wide">Start the conversation</p>
             </div>
           ) : (
-            currentMessages.map((msg) => {
-              const isMe = msg.sender === currentUser.username;
-              return (
-                <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
-                  <div className="flex items-baseline gap-2 mb-1.5 px-1">
-                    <span className={`text-sm font-medium ${msg.sender === 'AI Assistant' ? 'text-emerald-400' : 'text-slate-300'}`}>
-                      {msg.sender}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                  
-                  <div className={`relative max-w-[85%] sm:max-w-[70%] rounded-2xl px-4 py-3 shadow-sm ${
-                    isMe 
-                      ? 'bg-indigo-600 text-white rounded-tr-sm shadow-indigo-900/20' 
-                      : msg.sender === 'AI Assistant'
-                        ? 'bg-emerald-500/10 text-emerald-100 rounded-tl-sm border border-emerald-500/20'
-                        : 'bg-white/5 text-slate-200 rounded-tl-sm border border-white/5'
-                  }`}>
-                    {msg.type === 'text' && (
-                      <div className="flex items-center gap-2">
-                        {msg.isGenerating && <Loader2 size={14} className="animate-spin text-emerald-400" />}
-                        <p className="whitespace-pre-wrap break-words leading-relaxed">{msg.content}</p>
-                        {isMe && msg.status === 'sending' && (
-                          <Loader2 size={14} className="animate-spin text-slate-400 ml-1 flex-shrink-0" />
-                        )}
-                        {isMe && msg.status === 'failed' && (
-                          <div className="flex items-center ml-1 flex-shrink-0 gap-1">
-                            <AlertCircle size={14} className="text-red-400" title="发送失败" />
-                            <button 
-                              onClick={() => sendClientMessage(currentRoom!.id, msg.content, msg.clientMessageId!, true)}
-                              className="text-slate-400 hover:text-white transition-colors bg-white/5 hover:bg-white/10 rounded p-0.5"
-                              title="重新发送"
-                            >
-                              <RefreshCw size={12} />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
+            <div className="flex flex-col gap-6 px-6 py-4">
+              {currentMessages.map((msg) => {
+                const isMe = msg.sender === currentUser.username;
+                const isAI = msg.sender === 'AI Assistant';
+                return (
+                  <div key={msg.id} className={`flex gap-3 w-full ${isMe ? 'flex-row-reverse' : 'flex-row'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+                    {/* Avatar */}
+                    <div className={`w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center font-bold text-white shadow-sm ${isAI ? 'bg-blue-600' : 'bg-zinc-800'}`}>
+                      {isAI ? <Sparkles size={18} /> : msg.sender.charAt(0).toUpperCase()}
+                    </div>
                     
-                    {msg.type === 'image' && (
-                      <div className="space-y-3">
-                        <p className={`text-sm opacity-90 flex items-center gap-1.5 ${isMe ? 'text-indigo-100' : 'text-slate-400'}`}>
-                          <Sparkles size={14} />
-                          {msg.content}
-                        </p>
-                        {msg.isGenerating ? (
-                          <div className="w-64 h-64 bg-black/20 rounded-xl flex flex-col items-center justify-center gap-3 animate-pulse border border-white/5">
-                            <Loader2 className="w-8 h-8 animate-spin text-indigo-400" />
-                            <span className="text-sm font-medium text-slate-400">AI 正在绘制...</span>
-                          </div>
-                        ) : msg.imageUrl ? (
-                          <div className="relative">
-                            <img 
-                              src={msg.imageUrl} 
-                              alt={msg.content} 
-                              className={`rounded-xl max-w-full h-auto shadow-lg hover:shadow-xl transition-shadow cursor-pointer border border-white/10 ${msg.status === 'sending' ? 'opacity-70' : ''}`}
-                              referrerPolicy="no-referrer"
-                              onClick={() => window.open(msg.imageUrl, '_blank')}
-                            />
+                    {/* Content */}
+                    <div className={`flex flex-col max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
+                      <div className={`flex items-baseline gap-2 mb-1.5 px-1 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                        <span className="text-sm font-bold text-zinc-300">
+                          {msg.sender}
+                        </span>
+                        <span className="text-xs text-zinc-500">
+                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      
+                      <div className={`relative px-4 py-3 text-base leading-relaxed shadow-sm ${
+                        isMe 
+                          ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm' 
+                          : isAI
+                            ? 'bg-zinc-900 border border-blue-500/30 text-zinc-200 rounded-2xl rounded-tl-sm'
+                            : 'bg-zinc-900 border border-zinc-800 text-zinc-200 rounded-2xl rounded-tl-sm'
+                      }`}>
+                        {msg.type === 'text' && (
+                          <div className={`flex items-center gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                            {msg.isGenerating && <Loader2 size={14} className="animate-spin text-blue-400" />}
+                            <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                             {isMe && msg.status === 'sending' && (
-                              <div className="absolute top-2 right-2 bg-black/50 rounded-full p-1">
-                                <Loader2 size={16} className="animate-spin text-white" />
-                              </div>
+                              <Loader2 size={14} className="animate-spin text-blue-200 ml-1 flex-shrink-0" />
                             )}
                             {isMe && msg.status === 'failed' && (
-                              <div className="absolute top-2 right-2 bg-black/50 rounded-full p-1 flex items-center gap-1">
-                                <AlertCircle size={16} className="text-red-400" title="发送失败" />
+                              <div className="flex items-center ml-1 flex-shrink-0 gap-1">
+                                <AlertCircle size={14} className="text-red-300" title="Failed to send" />
                                 <button 
-                                  onClick={() => sendClientMessage(currentRoom!.id, msg.content, msg.clientMessageId!, true, 'image', msg.imageUrl)}
-                                  className="text-white hover:text-red-300 transition-colors bg-white/10 hover:bg-white/20 rounded p-1"
-                                  title="重新发送"
+                                  onClick={() => sendClientMessage(currentRoom!.id, msg.content, msg.clientMessageId!, true)}
+                                  className="text-blue-200 hover:text-white transition-colors p-1"
+                                  title="Retry"
                                 >
-                                  <RefreshCw size={14} />
+                                  <RefreshCw size={12} />
                                 </button>
                               </div>
                             )}
                           </div>
-                        ) : null}
+                        )}
+                        
+                        {msg.type === 'image' && (
+                          <div className="space-y-3">
+                            <p className={`text-sm flex items-center gap-1.5 ${isMe ? 'text-blue-100' : 'text-zinc-400'}`}>
+                              <Sparkles size={14} />
+                              {msg.content}
+                            </p>
+                            {msg.isGenerating ? (
+                              <div className="w-64 h-64 bg-zinc-900/50 rounded-xl flex flex-col items-center justify-center gap-3 animate-pulse border border-zinc-800/50">
+                                <Loader2 className="w-8 h-8 animate-spin text-zinc-500" />
+                                <span className="text-sm font-medium text-zinc-500">Generating...</span>
+                              </div>
+                            ) : msg.imageUrl ? (
+                              <div className="relative inline-block">
+                                <img 
+                                  src={msg.imageUrl} 
+                                  alt={msg.content} 
+                                  className={`rounded-xl max-w-sm h-auto border border-zinc-800/50 cursor-pointer shadow-md ${msg.status === 'sending' ? 'opacity-70' : ''}`}
+                                  referrerPolicy="no-referrer"
+                                  onClick={() => window.open(msg.imageUrl, '_blank')}
+                                />
+                                {isMe && msg.status === 'sending' && (
+                                  <div className="absolute top-2 right-2 bg-black/50 rounded-full p-1">
+                                    <Loader2 size={16} className="animate-spin text-white" />
+                                  </div>
+                                )}
+                                {isMe && msg.status === 'failed' && (
+                                  <div className="absolute top-2 right-2 bg-black/50 rounded-full p-1 flex items-center gap-1">
+                                    <AlertCircle size={16} className="text-red-500" title="Failed to send" />
+                                    <button 
+                                      onClick={() => sendClientMessage(currentRoom!.id, msg.content, msg.clientMessageId!, true, 'image', msg.imageUrl)}
+                                      className="text-white hover:text-red-400 transition-colors bg-black/50 hover:bg-black/80 rounded-full p-1"
+                                      title="Retry"
+                                    >
+                                      <RefreshCw size={14} />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
                       </div>
-                    )}
+                    </div>
                   </div>
-                </div>
-              );
-            })
+                );
+              })}
+            </div>
           )}
-          <div ref={messagesEndRef} />
+          <div ref={messagesEndRef} className="h-4" />
         </div>
 
         {/* Unread Messages Badge */}
@@ -950,103 +961,104 @@ export function Chat({ user, onLogout }: ChatProps) {
               scrollToBottom();
               setUnreadCount(0);
             }}
-            className="absolute bottom-28 right-8 bg-indigo-600 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 hover:bg-indigo-500 transition-all animate-in slide-in-from-bottom-5 z-20 border border-indigo-400/30"
+            className="absolute bottom-32 right-8 bg-white text-black px-4 py-2 rounded-full shadow-lg flex items-center gap-2 hover:bg-zinc-200 transition-all z-20 font-bold text-sm"
           >
             <span className="flex h-2 w-2 relative">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-black opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-black"></span>
             </span>
-            <span className="text-sm font-medium">{unreadCount} 条新消息</span>
+            <span>{unreadCount} new messages</span>
           </button>
         )}
 
         {/* Input Area */}
-        <div className="p-4 sm:p-6 bg-[#131825] border-t border-white/5">
-          <form onSubmit={handleSendMessage} className="flex items-end gap-3 max-w-5xl mx-auto">
-            <div className="flex-1 relative group">
-              <input
-                type="text"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                placeholder={currentRoom ? `在 #${currentRoom.name} 中发送消息...` : '请选择一个频道...'}
-                className="w-full bg-black/20 border border-white/10 text-white rounded-2xl pl-4 pr-12 py-3.5 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 focus:bg-black/40 hover:bg-black/30 transition-all shadow-inner placeholder:text-slate-500"
-                disabled={isGenerating || !currentRoom}
-              />
-            </div>
-            
-            <button
-              type="button"
-              onClick={handleGenerateImage}
-              disabled={isGenerating || !inputValue.trim() || !currentRoom}
-              title="使用 AI 生成图片"
-              className="p-3.5 text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 rounded-2xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
-            >
-              <ImageIcon size={22} />
-            </button>
-            
-            <button
-              type="submit"
-              disabled={isGenerating || !inputValue.trim() || !currentRoom}
-              className="p-3.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 shadow-lg shadow-indigo-900/20 transform hover:-translate-y-0.5 border border-indigo-500/50"
-            >
-              <Send size={22} />
-            </button>
-          </form>
+        <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black via-black/90 to-transparent pointer-events-none">
+          <div className="max-w-4xl mx-auto pointer-events-auto">
+            <form onSubmit={handleSendMessage} className="flex items-end gap-2 p-2 bg-zinc-900/80 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] shadow-2xl">
+              <div className="flex-1 relative group">
+                <input
+                  type="text"
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  placeholder={currentRoom ? `Message #${currentRoom.name}` : 'Select a channel...'}
+                  className="w-full bg-transparent text-white pl-6 pr-4 py-4 focus:outline-none placeholder:text-zinc-500 text-base"
+                  disabled={isGenerating || !currentRoom}
+                />
+              </div>
+              
+              <button
+                type="button"
+                onClick={handleGenerateImage}
+                disabled={isGenerating || !inputValue.trim() || !currentRoom}
+                title="Generate Image with AI"
+                className="p-3.5 text-zinc-400 hover:text-white bg-transparent hover:bg-white/5 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+              >
+                <ImageIcon size={22} />
+              </button>
+              
+              <button
+                type="submit"
+                disabled={isGenerating || !inputValue.trim() || !currentRoom}
+                className="p-3.5 bg-white hover:bg-zinc-200 text-black rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 font-bold shadow-md"
+              >
+                <Send size={20} className="ml-0.5" />
+              </button>
+            </form>
+          </div>
         </div>
       </main>
 
       {/* Create Room Modal */}
       {showCreateRoom && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-[#131825] border border-white/10 rounded-3xl p-6 w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-black border border-zinc-800 rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                <Hash className="text-indigo-400" />
-                创建新频道
+                Create Channel
               </h3>
               <button 
                 onClick={() => setShowCreateRoom(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/5 transition-colors"
+                className="text-zinc-500 hover:text-white p-2 rounded-full hover:bg-zinc-900 transition-colors"
               >
                 <X size={20} />
               </button>
             </div>
             
-            <form onSubmit={handleCreateRoom} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-slate-300 ml-1">频道名称</label>
+            <form onSubmit={handleCreateRoom} className="space-y-5">
+              <div className="space-y-2">
+                <label className="block text-sm font-bold text-zinc-400">Name</label>
                 <input
                   type="text"
                   required
                   value={newRoomName}
                   onChange={(e) => setNewRoomName(e.target.value)}
-                  className="block w-full px-4 py-3 border border-white/10 rounded-xl bg-black/20 focus:bg-black/40 focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all text-white placeholder:text-slate-600 outline-none"
-                  placeholder="例如：游戏开黑"
+                  className="block w-full px-4 py-3 border border-zinc-800 rounded-md bg-black focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-white placeholder:text-zinc-600 outline-none"
+                  placeholder="e.g. gaming"
                 />
               </div>
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-slate-300 ml-1">频道描述 (可选)</label>
+              <div className="space-y-2">
+                <label className="block text-sm font-bold text-zinc-400">Description (Optional)</label>
                 <input
                   type="text"
                   value={newRoomDesc}
                   onChange={(e) => setNewRoomDesc(e.target.value)}
-                  className="block w-full px-4 py-3 border border-white/10 rounded-xl bg-black/20 focus:bg-black/40 focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all text-white placeholder:text-slate-600 outline-none"
-                  placeholder="这个频道是用来做什么的？"
+                  className="block w-full px-4 py-3 border border-zinc-800 rounded-md bg-black focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-white placeholder:text-zinc-600 outline-none"
+                  placeholder="What's this channel about?"
                 />
               </div>
               <div className="pt-4 flex gap-3">
                 <button
                   type="button"
                   onClick={() => setShowCreateRoom(false)}
-                  className="flex-1 py-3 px-4 bg-white/5 hover:bg-white/10 text-white rounded-xl font-medium transition-colors"
+                  className="flex-1 py-3 px-4 bg-transparent hover:bg-zinc-900 text-white rounded-full font-bold transition-colors border border-zinc-800"
                 >
-                  取消
+                  Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-medium shadow-lg shadow-indigo-900/20 transition-colors border border-indigo-500/50"
+                  className="flex-1 py-3 px-4 bg-white hover:bg-zinc-200 text-black rounded-full font-bold transition-colors"
                 >
-                  创建频道
+                  Create
                 </button>
               </div>
             </form>

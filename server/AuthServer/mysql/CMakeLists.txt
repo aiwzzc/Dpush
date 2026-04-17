@@ -1,4 +1,4 @@
-aux_source_directory(${CMAKE_SOURCE_DIR}/mysql MYSQLPOOL)
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} MYSQLPOOL)
 
 add_library(MySQLPool ${MYSQLPOOL})
 

@@ -39,14 +39,6 @@ static std::string readFile(const std::string& filePath) {
 //         GatewayPubSubManager::RegisterLoop(loop);
 //     });
 
-//     std::string base_dir = "/home/zzc/linux_test/DistributedPush/client/web/dist";
-
-//     HttpServer::StaticFilesHash["/"] = readFile(base_dir + "/index.html");
-//     HttpServer::StaticFilesHash["/assets/vendor-react-BmTVS5Bk.js"] = readFile(base_dir + "/assets/vendor-react-BmTVS5Bk.js");
-//     HttpServer::StaticFilesHash["/assets/vendor-DfouWq7l.js"] = readFile(base_dir + "/assets/vendor-DfouWq7l.js");
-//     HttpServer::StaticFilesHash["/assets/index-gC83B9SE.js"] = readFile(base_dir + "/assets/index-gC83B9SE.js");
-//     HttpServer::StaticFilesHash["/assets/index-CFPWEv43.css"] = readFile(base_dir + "/assets/index-CFPWEv43.css");
-//     HttpServer::StaticFilesHash["/assets/vendor-genai-C1rGU7lY.js"] = readFile(base_dir + "/assets/vendor-genai-C1rGU7lY.js");
 // }
 
 HttpServer::HttpServer(uint16_t start_port, int port_count, const std::string& name, int total_event_loops):
@@ -64,16 +56,12 @@ HttpServer::HttpServer(uint16_t start_port, int port_count, const std::string& n
         auto server = std::make_unique<TcpServer>(this->loop_.get(), addr, server_name, TcpServer::kReusePort);
 
         server->setMessageCallback([this] (const TcpConnectionPtr& conn, muduo::net::Buffer* buf, muduo::Timestamp) {
-            onMessage(conn, buf->retrieveAsString(buf->readableBytes()));
+            onMessage(conn, buf);
         });
 
         server->setConnectionCallback([this] (const TcpConnectionPtr& conn) { onConnection(conn); });
 
         server->setThreadNum(threads_per_server);
-
-        // server->setThreadInitCallback([] (EventLoop* loop) {
-        //     GatewayPubSubManager::RegisterLoop(loop);
-        // });
 
         this->servers_.emplace_back(std::move(server));
     }
@@ -81,15 +69,6 @@ HttpServer::HttpServer(uint16_t start_port, int port_count, const std::string& n
     setHttpCallback([this] (const TcpConnectionPtr& conn, const HttpRequest& req) { 
         defaultHttpCallback(conn, req); 
     });
-
-    std::string base_dir = "/home/zzc/linux_test/DistributedPush/client/web/dist";
-
-    HttpServer::StaticFilesHash["/"] = readFile(base_dir + "/index.html");
-    HttpServer::StaticFilesHash["/assets/vendor-react-BmTVS5Bk.js"] = readFile(base_dir + "/assets/vendor-react-BmTVS5Bk.js");
-    HttpServer::StaticFilesHash["/assets/vendor-DfouWq7l.js"] = readFile(base_dir + "/assets/vendor-DfouWq7l.js");
-    HttpServer::StaticFilesHash["/assets/index-gC83B9SE.js"] = readFile(base_dir + "/assets/index-gC83B9SE.js");
-    HttpServer::StaticFilesHash["/assets/index-CFPWEv43.css"] = readFile(base_dir + "/assets/index-CFPWEv43.css");
-    HttpServer::StaticFilesHash["/assets/vendor-genai-C1rGU7lY.js"] = readFile(base_dir + "/assets/vendor-genai-C1rGU7lY.js");
 }
 
 HttpServer::~HttpServer() = default;
@@ -131,21 +110,24 @@ void HttpServer::onConnection(const TcpConnectionPtr& conn) {
     );
 }
 
-void HttpServer::onMessage(const TcpConnectionPtr& conn, std::string buf) {
+void HttpServer::onMessage(const TcpConnectionPtr& conn, muduo::net::Buffer* buf) {
     if(conn->disconnected()) return;
-
+std::cout << std::string_view(buf->peek(), buf->readableBytes()) << std::endl;
     HttpContext* context = std::any_cast<HttpContext>(conn->getMutableContext());
     if(context == nullptr) return;
 
     if(!context->parseRequest(buf)) {
-        std::string badStr("HTTP/1.1 400 Bad Request\r\n\r\n");
-        conn->send(badStr);
+        std::string_view badStr("HTTP/1.1 400 Bad Request\r\n\r\n");
+        std::cout << badStr << std::endl;
+        conn->send(badStr.data(), badStr.size());
         conn->shutdown();
         return;
     }
 
     if(context->gotAll()) {
-        if(context->request().getHeader("Connection").find("Upgrade") != std::string::npos) {
+        auto connection_opt = context->request().getHeader("Connection");
+
+        if(connection_opt.has_value() && (*connection_opt.value()).find("Upgrade") != std::string::npos) {
             if(this->upgradeCallback_) {
                 this->upgradeCallback_(conn, context->request());
 
@@ -155,7 +137,7 @@ void HttpServer::onMessage(const TcpConnectionPtr& conn, std::string buf) {
 
         } else {
             onRequest(conn, context->request());
-            if(context->request().getHeader("Connection") == "keep-alive") context->reset();
+            if(connection_opt.has_value() && *connection_opt.value() == "keep-alive") context->reset();
         }
     }
 }

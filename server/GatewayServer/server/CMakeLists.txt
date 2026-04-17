@@ -1,8 +1,8 @@
 include_directories(${CMAKE_SOURCE_DIR})
 
-aux_source_directory(${CMAKE_SOURCE_DIR}/server Server_SRC)
-aux_source_directory(${CMAKE_SOURCE_DIR}/base Base_SRC)
-aux_source_directory(${CMAKE_SOURCE_DIR}/../base Global_Base_SRC)
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} Server_SRC)
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR}/../base Base_SRC)
+aux_source_directory(${CMAKE_SOURCE_DIR}/base Global_Base_SRC)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(JEMALLOC jemalloc)

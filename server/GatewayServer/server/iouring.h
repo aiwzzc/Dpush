@@ -25,7 +25,8 @@ using muduo::net::TcpConnectionPtr;
 #define container_of(ptr, type, member) \
     ((type*)((char*)(ptr) - offsetof(type, member)))
 
-constexpr size_t kEntresLength = 16384;
+constexpr std::size_t kEntresLength          = 16384;
+constexpr std::size_t kPendingWritePoolSize  = 100000;
 
 struct list_head {
     list_head* next_;
@@ -156,7 +157,7 @@ public:
         this->channel_->setReadCallback([this] (Timestamp timeout) { handleCqes(); });
         this->channel_->enableReading();
 
-        this->pool_ = new PendingWritePool(kEntresLength);
+        this->pool_ = new PendingWritePool(kPendingWritePoolSize);
         this->pool_->initPool();
     }
 
@@ -317,3 +318,7 @@ private:
 
     std::unique_ptr<Channel> channel_;
 };
+
+/*
+io_uring, c++20 coroutine, muduo, etcd, nginx, grpc, kafka, redis, mysql, flatbuffer, websocket
+*/

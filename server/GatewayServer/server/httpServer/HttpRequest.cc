@@ -53,13 +53,13 @@ const std::string& HttpRequest::path() const { return this->path_; }
 const std::string& HttpRequest::query() const { return this->query_; }
 const std::string& HttpRequest::body() const { return this->body_; }
 const std::map<std::string, std::string, CaseInsensitiveLess>& HttpRequest::headers() const { return this->headers_; }
-std::string HttpRequest::getHeader(const std::string& field) const {
-    std::string result{};
+std::optional<const std::string*> HttpRequest::getHeader(const std::string& field) const {
     auto it = this->headers_.find(field);
-    if(it != this->headers_.end()) result.assign(it->second);
+    if(it != this->headers_.end()) return &it->second;
 
-    return result;
+    return std::nullopt;
 }
+
 std::string HttpRequest::getQueryParam(const std::string& key) const {
     if(key.empty()) return "";
 

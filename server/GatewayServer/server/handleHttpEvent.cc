@@ -11,6 +11,16 @@
 #include <fstream>
 #include <sstream>
 
+static std::string readFile(const std::string& filePath) {
+    std::ifstream file(filePath);
+    if (!file) {
+        return "";
+    }
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
+
 // 根据文件后缀名推断 MIME 类型
 std::string GetMimeType(const std::string& path) {
     if (path.find(".html") != std::string::npos) return "text/html;charset=utf-8";
@@ -33,7 +43,9 @@ void encodeLoginJson(grpcClient::api_error_id id, const std::string& message, st
 void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const grpcClientPtr& client) {
     if(conn->disconnected()) return;
 
-    const std::string& connection = req.getHeader("Connection");
+    auto opt_connection = req.getHeader("Connection");
+
+    const std::string& connection = *opt_connection.value();
     bool close = connection == "close" || (req.version() == HttpRequest::Version::kHttp10 && connection != "keep-alive");
 
     HttpResponse res{close};
@@ -163,10 +175,10 @@ void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const
             file_path = "/index.html";
         }
 
-        // std::string full_path = base_dir + file_path;
-        // std::string content = readFile(full_path);
+        std::string full_path = base_dir + file_path;
+        std::string content = readFile(full_path);
 
-        std::string content = HttpServer::StaticFilesHash[file_path];
+        // std::string content = HttpServer::StaticFilesHash[file_path];
 
         if (!content.empty()) {
             // 找到了对应的静态文件 (如 /assets/index-xxx.js)
@@ -191,8 +203,8 @@ void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const
             } else {
                 // 对于 React 单页应用，如果用户刷新了某个前端路由（如 /chat），
                 // 后端找不到这个文件，应该统一返回 index.html，交由前端 React Router 处理
-                // std::string index_content = readFile(base_dir + "/index.html");
-                std::string index_content = HttpServer::StaticFilesHash["/"];
+                std::string index_content = readFile(base_dir + "/index.html");
+                // std::string index_content = HttpServer::StaticFilesHash["/"];
                 if (!index_content.empty()) {
                     res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
                     res.setStatusMessage("OK");

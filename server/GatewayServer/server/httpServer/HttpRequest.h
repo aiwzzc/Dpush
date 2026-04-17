@@ -4,6 +4,7 @@
 #include <map>
 #include <algorithm>
 #include <unordered_map>
+#include <optional>
 
 struct CaseInsensitiveLess {
     bool operator()(const std::string& a, const std::string& b) const {
@@ -53,7 +54,7 @@ public:
     const std::string& query() const;
     const std::string& body() const;
     const std::map<std::string, std::string, CaseInsensitiveLess>& headers() const;
-    std::string getHeader(const std::string& field) const;
+    std::optional<const std::string*> getHeader(const std::string& field) const;
     std::string getQueryParam(const std::string& key) const;
 
     std::string methodString() const;

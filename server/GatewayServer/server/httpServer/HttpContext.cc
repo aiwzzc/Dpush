@@ -1,4 +1,5 @@
 #include "HttpContext.h"
+#include "muduo/net/Buffer.h"
 #include <algorithm>
 
 HttpContext::HttpContext() : state_(HttpContext::HttpRequestParseState::kExpectRequestLine) {}
@@ -46,19 +47,19 @@ bool HttpContext::processRequestLine(const char* begin, const char* end) {
     return succeed;
 }
 #include <iostream>
-bool HttpContext::parseRequest(std::string& buf) {
+bool HttpContext::parseRequest(muduo::net::Buffer* buf) {
     bool ok{true};
     bool hasMore{true};
     
     while(hasMore) {
         if(this->state_ == HttpContext::HttpRequestParseState::kExpectRequestLine) {
-            std::size_t crlf = buf.find("\r\n");
-            if(crlf != std::string::npos) {
-                ok = processRequestLine(buf.c_str(), buf.c_str() + crlf);
+            const char* crlf = buf->findCRLF();
+            if(crlf != NULL) {
+                ok = processRequestLine(buf->peek(), crlf);
 
                 if(ok) {
                     this->state_ = HttpContext::HttpRequestParseState::kExpectHeaders;
-                    buf.erase(0, crlf + 2);
+                    buf->retrieve(crlf - buf->peek() + 2);
 
                 } else {
                     hasMore = false;
@@ -69,20 +70,20 @@ bool HttpContext::parseRequest(std::string& buf) {
             }
 
         } else if(this->state_ == HttpContext::HttpRequestParseState::kExpectHeaders) {
-            std::size_t crlf = buf.find("\r\n");
-            if(crlf != std::string::npos) {
-                if(crlf == 0) {
+            const char* crlf = buf->findCRLF();
+            if(crlf != NULL) {
+                if(crlf == buf->peek()) {
                     this->state_ = HttpContext::HttpRequestParseState::kExpectBody;
-                    buf.erase(0, 2);
+                    buf->retrieve(2);
 
                 } else {
-                    std::size_t colon = buf.find(":");
-                    if(colon != std::string::npos && colon < crlf) {
-                        this->request_.addHeader(buf.c_str(), buf.c_str() + colon, buf.c_str() + crlf);
+                    const char* colon = buf->find(":", 1);
+                    if(colon != nullptr && colon < crlf) {
+                        this->request_.addHeader(buf->peek(), colon, crlf);
                         
                     } else {}
 
-                    buf.erase(0, crlf + 2);
+                    buf->retrieve(crlf - buf->peek() + 2);
                 }
 
             } else {
@@ -90,20 +91,23 @@ bool HttpContext::parseRequest(std::string& buf) {
             }
 
         } else if(this->state_ == HttpContext::HttpRequestParseState::kExpectBody) {
-            std::string strlen = this->request_.getHeader("Content-Length");
+            auto strlen_opt = this->request_.getHeader("Content-Length");
 
-            if(strlen.empty()) {
+            if(!strlen_opt.has_value()) {
                 this->state_ = HttpContext::HttpRequestParseState::kGotAll;
 
                 return ok;
             }
 
+            const std::string& strlen = *strlen_opt.value();
+
             std::size_t content_length = std::stoul(strlen);
 
-            if(buf.size() >= content_length) {
-                this->request_.setBody(buf.c_str(), buf.c_str() + content_length);
+            if(buf->readableBytes() >= content_length) {
+                this->request_.setBody(buf->peek(), buf->peek() + content_length);
                 this->state_ = HttpContext::HttpRequestParseState::kGotAll;
-                buf.erase(0, content_length);
+                
+                buf->retrieve(content_length);
 
             } else {
                 hasMore = false;
