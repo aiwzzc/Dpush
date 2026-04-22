@@ -41,6 +41,12 @@ public:
     grpc::ServerUnaryReactor* clearCursors(grpc::CallbackServerContext* context, const logic::clearCursorsRequest* request, 
         logic::clearCursorsResponse* response) override;
 
+    grpc::ServerWriteReactor<logic::bathPullMessageResponse>* bathPullMessage(grpc::CallbackServerContext* context,
+    const logic::bathPullMessageRequest* request) override;
+
+    grpc::ServerUnaryReactor* joinSession(grpc::CallbackServerContext* context, const logic::joinSessionRequest* request, 
+        logic::joinSessionResponse* response) override;
+
 private:
     DetachedTask DoinitialPullMessage(grpc::ServerUnaryReactor*, const logic::pullMessageRequest*, 
         logic::pullMessageResponse*);
@@ -51,7 +57,27 @@ private:
     DetachedTask DoclearCursors(grpc::ServerUnaryReactor*, const logic::clearCursorsRequest*, 
         logic::clearCursorsResponse*);
 
+    DetachedTask DojoinSession(grpc::ServerUnaryReactor*, const logic::joinSessionRequest*, 
+        logic::joinSessionResponse*);
+
     MySQLConnPool* mysql_pool_;
     sw::redis::Redis* redis_pool_;
     ComputeThreadPool* thread_pool_;
+};
+
+class BatchPullReactor : public ::grpc::ServerWriteReactor<logic::bathPullMessageResponse> {
+
+public:
+    BatchPullReactor(const logic::bathPullMessageRequest*, sw::redis::Redis*, ComputeThreadPool*);
+
+    void OnWriteDone(bool ok) override;
+    void OnDone() override;
+private:
+    DetachedTask FetchNextAndWrite();
+
+    const logic::bathPullMessageRequest* request_;
+    logic::bathPullMessageResponse response_;
+    sw::redis::Redis* redis_pool_;
+    ComputeThreadPool* thread_pool_;
+    std::size_t current_index_{0};
 };

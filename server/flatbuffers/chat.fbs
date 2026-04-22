@@ -62,6 +62,15 @@ table PullMissingMessagePayload {
     missing_message_ids: [long]; 
 } 
 
+table BatchPullMessageItem {
+    room_id: string;
+    last_message_id: long;
+}
+
+table BatchPullMessagePayload {
+    rooms: [BatchPullMessageItem];
+}
+
 table RequestRoomHistoryPayload { 
     room_id: string; 
     count: long; 
@@ -92,8 +101,16 @@ table StreamMessagePayload {
     timestamp: long;
 }
 
+table JoinSessionPayload {
+    room_id: string;           
+    roomname: string; 
+    messages: [ServerMessageItem]; 
+}
+
 union AnyPayload {
     HelloMessagePayload,
+    BatchPullMessagePayload,
+    JoinSessionPayload,
     ClientMessagePayload, 
     ServerMessagePayload, 
     RequestRoomHistoryPayload, 

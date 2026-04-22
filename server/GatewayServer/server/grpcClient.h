@@ -25,6 +25,8 @@ struct LogicInfo {
     int errcode;
     std::string errmsg;
     std::string token;
+    int32_t userid;
+    std::string username;
 };
 
 struct RegisterInfo {
@@ -60,6 +62,9 @@ public:
     std::function<void(std::string)> callback);
     void rpcclearCursorsAsync(int32_t userid, std::function<void()>);
     void rpcGetUserRoomListAsync(int32_t userid, std::function<void(std::vector<std::string>)>);
+    void rpcJoinRoomAsync(int32_t userid, const std::string& room_id, const std::function<void(int)>&);
+    void rpcJoinRooms(int32_t userid, std::vector<std::string>& rooms);
+    void rpcBathPullMessageAsync(const std::string& message, std::function<void(const std::string&)> callback);
 
     static std::string api_error_id_to_string(api_error_id id);
     static std::optional<api_error_id> to_api_error_id(int v);
@@ -75,3 +80,21 @@ private:
 };
 
 using grpcClientPtr = std::shared_ptr<grpcClient>;
+
+class BathPullClientReactor : public ::grpc::ClientReadReactor<logic::bathPullMessageResponse> {
+
+public:
+    BathPullClientReactor(logic::LogicServer::Stub*, ::grpc::ClientContext*, logic::bathPullMessageRequest*,
+        const std::function<void(const std::string&)>&, const std::function<void(const ::grpc::Status&)>&);
+
+    void OnReadDone(bool ok) override;
+    void OnDone(const ::grpc::Status& status) override;
+
+private:
+    ::grpc::ClientContext* context_;
+    logic::bathPullMessageResponse response_;
+
+    std::function<void(const std::string&)> on_message_cb_;
+    std::function<void(const ::grpc::Status&)> on_done_cb_;
+
+};

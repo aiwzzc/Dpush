@@ -19,6 +19,7 @@ KafkaConsumer::KafkaConsumer(const std::string& brokers, const std::string& grou
     conf->set("group.id", group_id, errstr);
 
     conf->set("auto.offset.reset", "earliest", errstr);
+    // conf->set("auto.offset.reset", "latest", errstr);
         
     // 1. 开启后台秘书线程，每 5 秒帮我们去网络汇报一次（极大降低网络IO，提升吞吐）
     conf->set("enable.auto.commit", "true", errstr);
@@ -212,9 +213,12 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
             {"payload", fb_binary}
         };
 
-        pipe.xadd("{" + roomid + "}", "*", stream_fields.begin(), stream_fields.end(), 500);
+        long long max_seq_id = returned_msgids.back();
+        std::string stream_id = std::to_string(max_seq_id) + "-0";
 
-        pipe.publish("room:" + roomid, fb_binary);
+        pipe.xadd("{" + roomid + "}", stream_id, stream_fields.begin(), stream_fields.end(), 500);
+
+        pipe.publish("room0:" + roomid, fb_binary);
 
         pipe.exec();
 

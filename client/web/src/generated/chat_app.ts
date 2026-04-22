@@ -1,7 +1,71 @@
 import * as flatbuffers from 'flatbuffers';
 
 export enum MsgContentType { Unknown = 0, Text = 1, Image = 2, Audio = 3 }
-export enum AnyPayload { NONE = 0, HelloMessagePayload = 1, ClientMessagePayload = 2, ServerMessagePayload = 3, RequestRoomHistoryPayload = 4, RequestMessagePayload = 5, PullMissingMessagePayload = 6, MessageAckPayload = 7 }
+export enum AnyPayload { NONE = 0, ClientMessagePayload = 2, ServerMessagePayload = 3, RequestRoomHistoryPayload = 4, RequestMessagePayload = 5, PullMissingMessagePayload = 6, MessageAckPayload = 7, BatchPullMessagePayload = 8, JoinSessionPayload = 9 }
+
+export class BatchPullMessageItem {
+  bb: flatbuffers.ByteBuffer | null = null;
+  bb_pos = 0;
+  __init(i: number, bb: flatbuffers.ByteBuffer): BatchPullMessageItem {
+    this.bb_pos = i;
+    this.bb = bb;
+    return this;
+  }
+  roomId(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+  lastMessageId(): bigint {
+    const offset = this.bb!.__offset(this.bb_pos, 6);
+    return offset ? this.bb!.readInt64(this.bb_pos + offset) : BigInt(0);
+  }
+  static startBatchPullMessageItem(builder: flatbuffers.Builder) {
+    builder.startObject(2);
+  }
+  static addRoomId(builder: flatbuffers.Builder, roomIdOffset: number) {
+    builder.addFieldOffset(0, roomIdOffset, 0);
+  }
+  static addLastMessageId(builder: flatbuffers.Builder, lastMessageId: bigint) {
+    builder.addFieldInt64(1, lastMessageId, BigInt(0));
+  }
+  static endBatchPullMessageItem(builder: flatbuffers.Builder): number {
+    return builder.endObject();
+  }
+}
+
+export class BatchPullMessagePayload {
+  bb: flatbuffers.ByteBuffer | null = null;
+  bb_pos = 0;
+  __init(i: number, bb: flatbuffers.ByteBuffer): BatchPullMessagePayload {
+    this.bb_pos = i;
+    this.bb = bb;
+    return this;
+  }
+  rooms(index: number, obj?: BatchPullMessageItem): BatchPullMessageItem | null {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? (obj || new BatchPullMessageItem()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+  }
+  roomsLength(): number {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+  }
+  static startBatchPullMessagePayload(builder: flatbuffers.Builder) {
+    builder.startObject(1);
+  }
+  static addRooms(builder: flatbuffers.Builder, roomsOffset: number) {
+    builder.addFieldOffset(0, roomsOffset, 0);
+  }
+  static createRoomsVector(builder: flatbuffers.Builder, data: number[] | Uint8Array): number {
+    builder.startVector(4, data.length, 4);
+    for (let i = data.length - 1; i >= 0; i--) {
+      builder.addOffset(data[i]!);
+    }
+    return builder.endVector();
+  }
+  static endBatchPullMessagePayload(builder: flatbuffers.Builder): number {
+    return builder.endObject();
+  }
+}
 
 export class User {
   bb: flatbuffers.ByteBuffer | null = null;
@@ -351,25 +415,33 @@ export class MessageAckPayload {
   }
 }
 
-export class HelloMessagePayload {
+export class JoinSessionPayload {
   bb: flatbuffers.ByteBuffer | null = null;
   bb_pos = 0;
-  __init(i: number, bb: flatbuffers.ByteBuffer): HelloMessagePayload {
+  __init(i: number, bb: flatbuffers.ByteBuffer): JoinSessionPayload {
     this.bb_pos = i;
     this.bb = bb;
     return this;
   }
-  me(obj?: User): User | null {
+  roomId(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 4);
-    return offset ? (obj || new User()).__init(this.bb!.__indirect(this.bb_pos + offset), this.bb!) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
   }
-  rooms(index: number, obj?: RoomItem): RoomItem | null {
+  roomname(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 6);
-    return offset ? (obj || new RoomItem()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
   }
-  roomsLength(): number {
-    const offset = this.bb!.__offset(this.bb_pos, 6);
+  messages(index: number, obj?: ServerMessageItem): ServerMessageItem | null {
+    const offset = this.bb!.__offset(this.bb_pos, 8);
+    return offset ? (obj || new ServerMessageItem()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+  }
+  messagesLength(): number {
+    const offset = this.bb!.__offset(this.bb_pos, 8);
     return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+  }
+
+  static getRootAsJoinSessionPayload(bb: flatbuffers.ByteBuffer, obj?: JoinSessionPayload): JoinSessionPayload {
+    return (obj || new JoinSessionPayload()).__init(bb.readInt32(bb.position()) + bb.position(), bb);
   }
 }
 

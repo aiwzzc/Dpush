@@ -69,6 +69,8 @@ redisVerifyAwaiter async_redisVerify_for_coro(sw::redis::Redis* redis, std::stri
     return redisVerifyAwaiter{redis, token};
 }
 
+namespace {
+
 template <typename... Args>
 std::string FormatString(const std::string &format, Args... args) {
     auto size = std::snprintf(nullptr, 0, format.c_str(), args...) + 1; // Extra space for '\0'
@@ -76,6 +78,8 @@ std::string FormatString(const std::string &format, Args... args) {
     std::snprintf(buf.get(), size, format.c_str(), args...);
     return std::string(buf.get(), buf.get() + size - 1); // We don't want the '\0' inside
 }
+
+};
 
 std::string generateUUID() {
     uuid_t uuid;

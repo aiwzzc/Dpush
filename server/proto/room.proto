@@ -28,5 +28,6 @@ message JoinRoomResponse {
 
 service RoomServer {
     rpc JoinRoom (JoinRoomRequest) returns (JoinRoomResponse);
+    rpc JoinRooms (stream JoinRoomRequest) returns (JoinRoomResponse);
     rpc GetUserRoomList (GetUserRoomListRequest) returns (GetUserRoomListResponse);
 }

@@ -33,15 +33,175 @@ std::string GetMimeType(const std::string& path) {
     return "application/octet-stream";
 }
 
-void encodeLoginJson(grpcClient::api_error_id id, const std::string& message, std::string& resp_json) {
+void encodeErrorLoginJson(grpcClient::api_error_id id, const std::string& message, std::string& resp_json) {
     JsonDoc root;
     root.root()["id"].set(grpcClient::api_error_id_to_string(id));
     root.root()["message"].set(message);
     resp_json = root.toString();
 }
 
-void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const grpcClientPtr& client) {
+void encodeLoginJsonBody(LogicInfo& info, std::string& resp_json) {
+    JsonDoc root;
+    root.root()["userinfo"]["userid"].set(info.userid);
+    root.root()["userinfo"]["username"].set(info.username);
+    resp_json = root.toString();
+}
+
+void sendResponse(const TcpConnectionPtr& conn, const HttpResponse& res) {
+    std::string resJson{};
+    res.appendToBuffer(resJson);
+    conn->send(resJson);
+
+    if(res.closeConnection()) conn->shutdown();
+}
+
+HttpEventRegister::HttpEventRegister() {
+    registerEvent({"/api/reg", HttpEventHandlers::register_api});
+    registerEvent({"/api/login", HttpEventHandlers::login_api});
+    registerEvent({"/api/joinsession", HttpEventHandlers::joinsession_api});
+    registerEvent({"/api/newsession", HttpEventHandlers::newsession_api});
+}
+
+HttpEventRegister& HttpEventRegister::getInstance() {
+    static HttpEventRegister instance;
+
+    return instance;
+}
+
+void HttpEventRegister::registerEvent(HttpEventDef def)
+{ HttpEventRegister::event_table_[def.name_] = def; }
+
+HttpEventDef* HttpEventRegister::loop_up(const std::string& name) {
+    auto it = this->event_table_.find(name);
+
+    return it == this->event_table_.end() ? nullptr : &it->second;
+}
+
+HttpEventHandlers& HttpEventHandlers::getInstance() {
+    static HttpEventHandlers instance;
+    return instance;
+}
+
+void HttpEventHandlers::register_api(HttpEventContext& ctx) {
+    int ret{0};
+    std::string errmsg{""};
+    
+    ctx.rpc_->rpcRegisterAsync(ctx.req_, ret, errmsg, [ctx] (RegisterInfo info) {
+        HttpResponse res{ctx.close_};
+
+        if(info.errcode < 0) {
+            std::string resJson;
+            std::optional<grpcClient::api_error_id> opt = grpcClient::to_api_error_id(info.errcode);
+            if(!opt.has_value()) return;
+            encodeErrorLoginJson(*opt, info.errmsg, resJson);
+
+            res.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
+            res.setStatusMessage("Bad Request");
+            res.setCloseConnection(true);
+            res.setBody(resJson);
+
+            sendResponse(ctx.conn_, res);
+
+        } else {
+            res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
+            res.setStatusMessage("OK");
+            res.setCloseConnection(true);
+            res.setBody("{}");
+
+            sendResponse(ctx.conn_, res);
+        }
+    });
+
+    if(ret < 0) {
+        std::string resJson;
+        std::optional<grpcClient::api_error_id> opt = grpcClient::to_api_error_id(ret);
+        if(!opt.has_value()) return;
+        encodeErrorLoginJson(*opt, errmsg, resJson);
+
+        ctx.res_.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
+        ctx.res_.setStatusMessage("Bad Request");
+        ctx.res_.setCloseConnection(true);
+        ctx.res_.setBody(resJson);
+
+        sendResponse(ctx.conn_, ctx.res_);
+    }
+}
+
+void HttpEventHandlers::login_api(HttpEventContext& ctx) {
+    int ret{0};
+    std::string errmsg{""};
+
+    ctx.rpc_->rpcLoginAsync(ctx.req_, ret, errmsg, [ctx] (LogicInfo info) {
+        HttpResponse res{ctx.close_};
+
+        if(info.errcode < 0) {
+            std::string resJson;
+            std::optional<grpcClient::api_error_id> opt = grpcClient::to_api_error_id(info.errcode);
+            if(!opt.has_value()) return;
+            encodeErrorLoginJson(*opt, info.errmsg, resJson);
+
+            res.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
+            res.setStatusMessage("Bad Request");
+            res.setCloseConnection(true);
+            res.setBody(resJson);
+
+            sendResponse(ctx.conn_, res);
+
+        } else {
+            std::string resJson;
+            encodeLoginJsonBody(info, resJson);
+            res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
+            res.setStatusMessage("OK");
+            res.setCloseConnection(true);
+            res.setCookie(info.token);
+            res.setBody(resJson);
+
+            sendResponse(ctx.conn_, res);
+        }
+    });
+
+    if(ret < 0) {
+        std::string resJson;
+        std::optional<grpcClient::api_error_id> opt = grpcClient::to_api_error_id(ret);
+        if(!opt.has_value()) return;
+        encodeErrorLoginJson(*opt, errmsg, resJson);
+
+        ctx.res_.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
+        ctx.res_.setStatusMessage("Bad Request");
+        ctx.res_.setCloseConnection(true);
+        ctx.res_.setBody(resJson);
+
+        sendResponse(ctx.conn_, ctx.res_);
+    }
+}
+
+void HttpEventHandlers::joinsession_api(HttpEventContext& ctx) {
+    JsonDoc root;
+
+    if(!root.parse(ctx.req_.body().c_str(), ctx.req_.body().size())) {
+
+    }
+
+    if(!root.root().isMember("userid") || !root.root()["userid"].isInt() ||
+       !root.root().isMember("roomname") || !root.root()["roomname"].isString()) {
+
+    }
+
+    int userid = root.root()["userid"].asInt();
+    std::string roomname = root.root()["roomname"].asString();
+
+
+}
+
+void HttpEventHandlers::newsession_api(HttpEventContext& ctx) {
+
+}
+
+void HttpEventHandlers::handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, 
+    const grpcClientPtr& client) {
     if(conn->disconnected()) return;
+
+    HttpEventRegister& register_ = HttpEventRegister::getInstance();
 
     auto opt_connection = req.getHeader("Connection");
 
@@ -58,103 +218,12 @@ void handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, const
         if(res.closeConnection()) conn->shutdown();
     };
 
-    auto sendHeadResponse = [] (const TcpConnectionPtr& conn, const HttpResponse& res, std::size_t body_size) {
-        std::string resJson{};
-        res.appendToHeadBuffer(resJson, body_size);
+    HttpEventContext ctx{conn, client, req, close, res};
 
-        conn->send(resJson);
-    };
+    HttpEventDef* def = register_.loop_up(req.path());
+    if(def) def->execute_(ctx);
 
-    if(req.path() == "/api/reg") {
-        int ret{0};
-        std::string errmsg{""};
-        
-        client->rpcRegisterAsync(req, ret, errmsg, [conn, close, sendResponse] (RegisterInfo info) {
-            HttpResponse res{close};
-
-            if(info.errcode < 0) {
-                std::string resJson;
-                std::optional<grpcClient::api_error_id> opt = grpcClient::to_api_error_id(info.errcode);
-                if(!opt.has_value()) return;
-                encodeLoginJson(*opt, info.errmsg, resJson);
-
-                res.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
-                res.setStatusMessage("Bad Request");
-                res.setCloseConnection(true);
-                res.setBody(resJson);
-
-                sendResponse(conn, res);
-
-            } else {
-                res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
-                res.setStatusMessage("OK");
-                res.setCloseConnection(true);
-                res.setBody("{}");
-
-                sendResponse(conn, res);
-            }
-        });
-
-        if(ret < 0) {
-            std::string resJson;
-            std::optional<grpcClient::api_error_id> opt = grpcClient::to_api_error_id(ret);
-            if(!opt.has_value()) return;
-            encodeLoginJson(*opt, errmsg, resJson);
-
-            res.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
-            res.setStatusMessage("Bad Request");
-            res.setCloseConnection(true);
-            res.setBody(resJson);
-
-            sendResponse(conn, res);
-        }
-
-    } else if(req.path() == "/api/login") {
-        int ret{0};
-        std::string errmsg{""};
-
-        client->rpcLoginAsync(req, ret, errmsg, [conn, close, sendResponse] (LogicInfo info) {
-            HttpResponse res{close};
-
-            if(info.errcode < 0) {
-                std::string resJson;
-                std::optional<grpcClient::api_error_id> opt = grpcClient::to_api_error_id(info.errcode);
-                if(!opt.has_value()) return;
-                encodeLoginJson(*opt, info.errmsg, resJson);
-
-                res.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
-                res.setStatusMessage("Bad Request");
-                res.setCloseConnection(true);
-                res.setBody(resJson);
-
-                sendResponse(conn, res);
-
-            } else {
-                res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
-                res.setStatusMessage("OK");
-                res.setCloseConnection(true);
-                res.setCookie(info.token);
-                res.setBody("{}");
-
-                sendResponse(conn, res);
-            }
-        });
-
-        if(ret < 0) {
-            std::string resJson;
-            std::optional<grpcClient::api_error_id> opt = grpcClient::to_api_error_id(ret);
-            if(!opt.has_value()) return;
-            encodeLoginJson(*opt, errmsg, resJson);
-
-            res.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
-            res.setStatusMessage("Bad Request");
-            res.setCloseConnection(true);
-            res.setBody(resJson);
-
-            sendResponse(conn, res);
-        }
-
-    } else {
+    else {
         // 注意：这里需要指向您前端项目执行 npm run build 后生成的 dist 目录
         std::string base_dir = "/home/zzc/linux_test/DistributedPush/client/web/dist";
         std::string file_path = req.path();

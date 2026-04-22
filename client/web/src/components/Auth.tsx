@@ -55,7 +55,17 @@ export function Auth({ onLogin }: AuthProps) {
           throw new Error(parseErrorMessage(errorData, '登录失败，请检查邮箱和密码'));
         }
 
-        onLogin({ username: email.split('@')[0], email });
+        let userinfo = { username: email.split('@')[0], email };
+        try {
+          const respData = await response.json();
+          if (respData && respData.userinfo) {
+            userinfo = { ...userinfo, ...respData.userinfo };
+          }
+        } catch (e) {
+          // Backward compatibility if backend doesn't return JSON
+        }
+
+        onLogin(userinfo);
       } else {
         const response = await fetch('/api/reg', {
           method: 'POST',

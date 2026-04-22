@@ -3,14 +3,10 @@ import { User, Message, Room } from '../types';
 import { Send, Image as ImageIcon, LogOut, Sparkles, Loader2, Hash, Plus, X, Users, MessageSquare, AlertCircle, RefreshCw } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import * as flatbuffers from 'flatbuffers';
-import { RootMessage, AnyPayload, ServerMessagePayload, RequestMessagePayload, MessageAckPayload, MsgContentType, HelloMessagePayload } from '../generated/chat_app';
-import { encodeClientMessage, encodePullMissingMessages, encodeRequestRoomHistory } from '../utils/fb-helper';
-
-const DEFAULT_ROOMS: Room[] = [
-  { id: 'general', name: '大厅', description: '所有人都在这里畅所欲言' },
-  { id: 'tech', name: '技术交流', description: '讨论编程、架构与前沿技术' },
-  { id: 'random', name: '摸鱼专区', description: '随便聊聊，放松一下' },
-];
+import localforage from 'localforage';
+import { RootMessage, AnyPayload, ServerMessagePayload, RequestMessagePayload, MessageAckPayload, MsgContentType } from '../generated/chat_app';
+import { encodeClientMessage, encodePullMissingMessages, encodeRequestRoomHistory, encodeBatchPullMessage } from '../utils/fb-helper';
+import { JoinSessionPayload } from '../generated/chat_app';
 
 // 智能解析时间戳（兼容秒级和毫秒级）
 const parseTimestamp = (ts: any) => {
@@ -46,6 +42,10 @@ export function Chat({ user, onLogout }: ChatProps) {
   const [isAiReplying, setIsAiReplying] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [isLocalLoaded, setIsLocalLoaded] = useState(false);
+  const [joinRoomQuery, setJoinRoomQuery] = useState('');
+  const [isJoiningRoom, setIsJoiningRoom] = useState(false);
+  const [joinRoomError, setJoinRoomError] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageContainerRef = useRef<HTMLDivElement>(null);
@@ -56,6 +56,62 @@ export function Chat({ user, onLogout }: ChatProps) {
   const businessTimeoutTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
   const roomMaxServerMsgIdRef = useRef<Record<string, number>>({});
   const pendingMessagesRef = useRef<Record<string, Record<number, any>>>({});
+  const roomsRef = useRef<Room[]>([]);
+
+  useEffect(() => {
+    roomsRef.current = rooms;
+  }, [rooms]);
+
+  useEffect(() => {
+    let isMounted = true;
+    
+    localforage.config({
+      name: 'XChat',
+      storeName: 'messages'
+    });
+
+    const loadLocalData = async () => {
+      try {
+        let savedRooms = await localforage.getItem<Room[]>(`rooms_${user.username}`) || [];
+        
+        // Remove legacy default rooms
+        const legacyIds = ['general', 'tech', 'random'];
+        savedRooms = savedRooms.filter(r => !legacyIds.includes(r.id));
+
+        const savedMessages = await localforage.getItem<Record<string, Message[]>>(`messages_${user.username}`) || {};
+        
+        if (!isMounted) return;
+        
+        for (const [roomId, msgs] of Object.entries(savedMessages)) {
+          let maxId = 0;
+          msgs.forEach((m) => {
+            if (m.serverMessageId !== undefined && m.serverMessageId > maxId) {
+              maxId = m.serverMessageId;
+            }
+          });
+          roomMaxServerMsgIdRef.current[roomId] = maxId;
+        }
+
+        setRooms(savedRooms);
+        setMessages(savedMessages);
+        
+        if (savedRooms.length > 0 && !currentRoomIdRef.current) {
+          setCurrentRoom(savedRooms[0]);
+        }
+        
+        setIsLocalLoaded(true);
+      } catch (err) {
+        console.error("Failed to load local data", err);
+        if (isMounted) setIsLocalLoaded(true);
+      }
+    };
+    
+    loadLocalData();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [user.username]);
 
   useEffect(() => {
     currentRoomIdRef.current = currentRoom?.id || null;
@@ -87,6 +143,8 @@ export function Chat({ user, onLogout }: ChatProps) {
 
   // 初始化 WebSocket 连接
   useEffect(() => {
+    if (!isLocalLoaded) return;
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     // 假设后端的 websocket 路径是 /ws
     const wsUrl = `${protocol}//${window.location.host}/ws`;
@@ -96,6 +154,16 @@ export function Chat({ user, onLogout }: ChatProps) {
 
     socket.onopen = () => {
       console.log('WebSocket connected');
+      // 发起批量拉取消息
+      const roomsToPull = roomsRef.current.length > 0 ? roomsRef.current : [];
+      if (roomsToPull.length > 0) {
+        const pullReqs = roomsToPull.map(r => ({
+          roomId: r.id,
+          maxId: roomMaxServerMsgIdRef.current[r.id] || 0
+        }));
+        const buf = encodeBatchPullMessage(pullReqs);
+        socket.send(buf);
+      }
     };
 
     socket.onmessage = async (event) => {
@@ -336,54 +404,6 @@ export function Chat({ user, onLogout }: ChatProps) {
                 });
               }
             }
-          } else if (payloadType === AnyPayload.HelloMessagePayload) {
-            const payload = root.payload(new HelloMessagePayload()) as HelloMessagePayload;
-            const me = payload.me();
-            if (me) {
-              setCurrentUser({ userid: Number(me.userid()), username: me.username() || 'Unknown' });
-            }
-            
-            const roomsLen = payload.roomsLength();
-            const parsedRooms: Room[] = [];
-            const initialMessages: Record<string, Message[]> = {};
-            const initialHasMore: Record<string, boolean> = {};
-
-            for (let i = 0; i < roomsLen; i++) {
-              const r = payload.rooms(i);
-              if (!r) continue;
-              const roomId = r.roomId() || '';
-              parsedRooms.push({
-                id: roomId,
-                name: r.roomname() || '',
-                description: ''
-              });
-
-              initialHasMore[roomId] = r.hasMoreMessages();
-              
-              const msgsLen = r.messagesLength();
-              const msgs: Message[] = [];
-              for (let j = 0; j < msgsLen; j++) {
-                const msg = r.messages(j);
-                if (!msg) continue;
-                msgs.push({
-                  id: msg.id() || Date.now().toString(),
-                  sender: msg.user()?.username() || 'Unknown',
-                  content: msg.content() || '',
-                  timestamp: parseTimestamp(Number(msg.timestamp())),
-                  type: msg.msgType() === MsgContentType.Image ? 'image' : 'text',
-                  imageUrl: msg.imageUrl() || undefined
-                });
-              }
-              initialMessages[roomId] = msgs.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-            }
-
-            setRooms(parsedRooms);
-            if (parsedRooms.length > 0 && !currentRoomIdRef.current) {
-              setCurrentRoom(parsedRooms[0]);
-            }
-            setMessages(prev => ({ ...prev, ...initialMessages }));
-            setHasMoreMessages(prev => ({ ...prev, ...initialHasMore }));
-            setTimeout(scrollToBottom, 100);
           }
           return;
         }
@@ -419,7 +439,21 @@ export function Chat({ user, onLogout }: ChatProps) {
     return () => {
       socket.close();
     };
-  }, [user.username]);
+  }, [user.username, isLocalLoaded]);
+
+  // Persist messages to IndexedDB
+  useEffect(() => {
+    if (isLocalLoaded && Object.keys(messages).length > 0) {
+      localforage.setItem(`messages_${user.username}`, messages).catch(console.error);
+    }
+  }, [messages, user.username, isLocalLoaded]);
+
+  // Persist rooms to IndexedDB
+  useEffect(() => {
+    if (isLocalLoaded && rooms.length > 0) {
+      localforage.setItem(`rooms_${user.username}`, rooms).catch(console.error);
+    }
+  }, [rooms, user.username, isLocalLoaded]);
 
   const sendClientMessage = (roomId: string, content: string, clientMessageId: string, isRetry = false, msgType: 'text' | 'image' = 'text', imageUrl?: string) => {
     const sendToWs = () => {
@@ -493,6 +527,119 @@ export function Chat({ user, onLogout }: ChatProps) {
           )
         };
       });
+    }
+  };
+
+  const handleJoinRoom = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!joinRoomQuery.trim() || !currentUser.userid) return;
+
+    setIsJoiningRoom(true);
+    setJoinRoomError('');
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
+
+    try {
+      const response = await fetch('/api/joinsession', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userid: currentUser.userid, roomname: joinRoomQuery.trim() }),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error('Failed to join room');
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      if (arrayBuffer.byteLength === 0) {
+        setJoinRoomError('没有找到该房间');
+        return;
+      }
+
+      const buf = new flatbuffers.ByteBuffer(new Uint8Array(arrayBuffer));
+      let joinPayload: JoinSessionPayload | null = null;
+      
+      try {
+        joinPayload = JoinSessionPayload.getRootAsJoinSessionPayload(buf);
+      } catch (e) {
+        try {
+          const rootMessage = RootMessage.getRootAsRootMessage(buf);
+          if (rootMessage.payloadType() === AnyPayload.JoinSessionPayload) {
+            joinPayload = rootMessage.payload(new JoinSessionPayload()) as JoinSessionPayload;
+          }
+        } catch (err) {}
+      }
+
+      if (!joinPayload) {
+         setJoinRoomError('房间数据解析失败');
+         return;
+      }
+
+      const roomId = joinPayload.roomId() || '';
+      const roomName = joinPayload.roomname() || '';
+      const messagesLen = joinPayload.messagesLength();
+
+      const newMsgs: Message[] = [];
+      for (let i = 0; i < messagesLen; i++) {
+         const msg = joinPayload.messages(i);
+         if (msg) {
+            newMsgs.push({
+              id: msg.serverMessageId().toString(), // Using serverMessageId as fallback id
+              clientMessageId: msg.clientMessageId() || undefined,
+              serverMessageId: Number(msg.serverMessageId()),
+              sender: msg.user()?.username() || 'Unknown',
+              content: msg.content() || '',
+              timestamp: parseTimestamp(Number(msg.timestamp())),
+              type: msg.msgType() === MsgContentType.Image ? 'image' : 'text',
+              imageUrl: msg.imageUrl() || undefined
+            });
+         }
+      }
+
+      const newRoom: Room = {
+        id: roomId,
+        name: roomName,
+        description: ''
+      };
+
+      setRooms(prev => {
+        if (!prev.find(r => r.id === newRoom.id)) {
+          return [...prev, newRoom];
+        }
+        return prev;
+      });
+
+      setMessages(prev => {
+        const existingMsgs = prev[roomId] || [];
+        const existingIds = new Set(existingMsgs.map(m => m.id));
+        const filtered = newMsgs.filter(m => !existingIds.has(m.id));
+        const merged = [...existingMsgs, ...filtered].sort((a,b) => a.timestamp.getTime() - b.timestamp.getTime());
+        
+        let maxId = roomMaxServerMsgIdRef.current[roomId] || 0;
+        merged.forEach(m => {
+          if (m.serverMessageId !== undefined && m.serverMessageId > maxId) {
+            maxId = m.serverMessageId;
+          }
+        });
+        roomMaxServerMsgIdRef.current[roomId] = maxId;
+
+        return { ...prev, [roomId]: merged };
+      });
+
+      setJoinRoomQuery('');
+      setCurrentRoom(newRoom);
+
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        setJoinRoomError('服务器响应超时，请重试');
+      } else {
+        setJoinRoomError('加入房间时发生错误');
+      }
+    } finally {
+      setIsJoiningRoom(false);
     }
   };
 
@@ -747,12 +894,12 @@ export function Chat({ user, onLogout }: ChatProps) {
 
   const currentMessages = currentRoom ? (messages[currentRoom.id] || []) : [];
 
-  if (!currentRoom && rooms.length === 0) {
+  if (!isLocalLoaded) {
     return (
       <div className="h-screen flex items-center justify-center bg-black text-zinc-400">
         <div className="flex flex-col items-center gap-4">
           <Loader2 className="w-8 h-8 animate-spin text-white" />
-          <p>Connecting to XChat...</p>
+          <p>Loading your profile...</p>
         </div>
       </div>
     );
@@ -787,15 +934,32 @@ export function Chat({ user, onLogout }: ChatProps) {
 
         {/* Room List */}
         <div className="flex-1 overflow-y-auto py-4">
-          <div className="px-4 mb-2 flex items-center justify-between group">
-            <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Channels</h3>
-            <button 
-              onClick={() => setShowCreateRoom(true)}
-              className="text-zinc-500 hover:text-white p-1 rounded-full hover:bg-zinc-900 transition-colors opacity-0 group-hover:opacity-100"
-              title="Create Channel"
-            >
-              <Plus size={16} />
-            </button>
+          <div className="px-4 mb-4">
+             <form onSubmit={handleJoinRoom} className="relative group">
+                <input
+                   type="text"
+                   value={joinRoomQuery}
+                   onChange={e => setJoinRoomQuery(e.target.value)}
+                   disabled={isJoiningRoom}
+                   placeholder="Search & Join Room..."
+                   className="w-full bg-zinc-900 border border-zinc-800 text-sm rounded-md py-2 px-3 text-zinc-300 placeholder-zinc-500 focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600 transition-all"
+                />
+                {isJoiningRoom ? (
+                  <div className="absolute right-3 top-2.5">
+                    <Loader2 className="w-4 h-4 animate-spin text-zinc-500" />
+                  </div>
+                ) : (
+                  <button type="submit" className="absolute right-3 top-2.5 text-zinc-500 hover:text-white transition-colors" disabled={!joinRoomQuery.trim()}>
+                    <Plus className="w-4 h-4" />
+                  </button>
+                )}
+             </form>
+             {joinRoomError && (
+                <div className="mt-2 text-xs text-red-500 px-1 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" />
+                  {joinRoomError}
+                </div>
+             )}
           </div>
           <div className="space-y-0.5 px-2">
             {rooms.map(room => (
@@ -818,41 +982,50 @@ export function Chat({ user, onLogout }: ChatProps) {
 
       {/* Main Chat Area */}
       <main className="flex-1 flex flex-col bg-black relative">
-        {/* Room Header */}
-        <header className="h-20 flex items-center px-8 bg-gradient-to-b from-black via-black/90 to-transparent sticky top-0 z-10">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-zinc-900 flex items-center justify-center text-zinc-400">
-              <Hash size={18} />
+        {!currentRoom ? (
+          <div className="h-full flex flex-col items-center justify-center text-zinc-500 space-y-6">
+            <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-zinc-800 to-zinc-900 flex items-center justify-center shadow-2xl border border-white/5">
+              <Hash size={32} className="text-zinc-400" />
             </div>
-            <div>
-              <h2 className="text-lg font-bold text-white">{currentRoom?.name}</h2>
-              {currentRoom?.description && (
-                <p className="text-xs text-zinc-500">{currentRoom.description}</p>
-              )}
-            </div>
+            <p className="text-lg tracking-wide">Please join or select a room</p>
           </div>
-        </header>
-
-        {/* Messages */}
-        <div 
-          className="flex-1 overflow-y-auto p-0 pb-36"
-          ref={messageContainerRef}
-          onScroll={handleScroll}
-        >
-          {isLoadingHistory && (
-            <div className="flex justify-center py-4 border-b border-zinc-800">
-              <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
-            </div>
-          )}
-          {currentMessages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-zinc-500 space-y-6">
-              <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-zinc-800 to-zinc-900 flex items-center justify-center shadow-2xl border border-white/5">
-                <MessageSquare size={32} className="text-zinc-400" />
+        ) : (
+          <>
+            {/* Room Header */}
+            <header className="h-20 flex items-center px-8 bg-gradient-to-b from-black via-black/90 to-transparent sticky top-0 z-10">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-zinc-900 flex items-center justify-center text-zinc-400">
+                  <Hash size={18} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white">{currentRoom.name}</h2>
+                  {currentRoom.description && (
+                    <p className="text-xs text-zinc-500">{currentRoom.description}</p>
+                  )}
+                </div>
               </div>
-              <p className="text-lg tracking-wide">Start the conversation</p>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-6 px-6 py-4">
+            </header>
+
+            {/* Messages */}
+            <div 
+              className="flex-1 overflow-y-auto p-0 pb-36"
+              ref={messageContainerRef}
+              onScroll={handleScroll}
+            >
+              {isLoadingHistory && (
+                <div className="flex justify-center py-4 border-b border-zinc-800">
+                  <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
+                </div>
+              )}
+              {currentMessages.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-zinc-500 space-y-6">
+                  <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-zinc-800 to-zinc-900 flex items-center justify-center shadow-2xl border border-white/5">
+                    <MessageSquare size={32} className="text-zinc-400" />
+                  </div>
+                  <p className="text-lg tracking-wide">Start the conversation</p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-6 px-6 py-4">
               {currentMessages.map((msg) => {
                 const isMe = msg.sender === currentUser.username;
                 const isAI = msg.sender === 'AI Assistant';
@@ -1006,6 +1179,8 @@ export function Chat({ user, onLogout }: ChatProps) {
             </form>
           </div>
         </div>
+        </>
+        )}
       </main>
 
       {/* Create Room Modal */}

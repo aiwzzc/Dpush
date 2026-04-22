@@ -78,7 +78,8 @@ void grpcClient::rpcLoginAsync(const HttpRequest& req, int& errcode, std::string
     this->Authstub->async()->Login(context.get(), request.get(), response.get(), 
     [request, response, context, callback] (grpc::Status s) {
         if(s.ok()) {
-            LogicInfo info = LogicInfo{response->code(), response->error_msg(), response->token()};
+            LogicInfo info = LogicInfo{response->code(), response->error_msg(), 
+            response->token(), response->userid(), response->username()};
             callback(info);
         }
     });
@@ -219,5 +220,84 @@ void grpcClient::rpcGetUserRoomListAsync(int32_t userid, std::function<void(std:
             callback(roomlist);
         }
     });
-    
+}
+
+void grpcClient::rpcJoinRoomAsync(int32_t userid, const std::string& room_id, const std::function<void(int)>& cb) {
+    auto ctx = std::make_shared<ClientContext>();
+    auto request = std::make_shared<room::JoinRoomRequest>();
+    auto response = std::make_shared<room::JoinRoomResponse>();
+
+    request->set_userid(userid);
+    request->set_room_id(std::move(room_id));
+
+    this->RoomStub->async()->JoinRoom(ctx.get(), request.get(), response.get(), 
+    [ctx, request, response, cb] (::grpc::Status s) {
+        if(s.ok()) {
+            cb(response->code());
+        }
+    });
+}
+
+void grpcClient::rpcJoinRooms(int32_t userid, std::vector<std::string>& rooms) {
+    ClientContext ctx;
+    room::JoinRoomResponse response;
+
+    auto writer = this->RoomStub->JoinRooms(&ctx, &response);
+
+    for(auto& room : rooms) {
+        room::JoinRoomRequest req;
+        req.set_userid(userid);
+        req.set_room_id(room);
+
+        writer->Write(req);
+    }
+
+    writer->WritesDone();
+    grpc::Status status = writer->Finish();
+}
+
+BathPullClientReactor::BathPullClientReactor(logic::LogicServer::Stub* stub, 
+    ::grpc::ClientContext* ctx, logic::bathPullMessageRequest* req,
+    const std::function<void(const std::string&)>& onmessage, const std::function<void(const ::grpc::Status&)>& ondone) : context_(ctx), 
+    on_message_cb_(std::move(onmessage)), on_done_cb_(std::move(ondone)) {
+
+    stub->async()->bathPullMessage(ctx, req, this);
+    StartRead(&this->response_);
+    StartCall();
+}
+
+void BathPullClientReactor::OnReadDone(bool ok) {
+    if(ok) {
+        if(this->on_message_cb_) {
+            on_message_cb_(this->response_.message());
+        }
+
+        StartRead(&this->response_);
+
+    } else {
+
+    }
+}
+
+void BathPullClientReactor::OnDone(const ::grpc::Status& status) {
+    if(this->on_done_cb_) {
+        this->on_done_cb_(status);
+    }
+
+    delete this;
+}
+
+void grpcClient::rpcBathPullMessageAsync(const std::string& message, std::function<void(const std::string&)> callback) {
+
+    auto context = std::make_shared<ClientContext>();
+    auto request = std::make_shared<logic::bathPullMessageRequest>();
+
+    request->set_message(std::move(message));
+
+    new BathPullClientReactor(this->Logicstub.get(), context.get(), request.get(), std::move(callback), 
+    [] (const ::grpc::Status& status) {
+        if(status.ok()) {
+
+        }
+    });
 }

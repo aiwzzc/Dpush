@@ -1,6 +1,7 @@
 #include "GatewayServer.h"
 #include "producer.h"
 #include "iouring.h"
+#include "handleHttpEvent.h"
 
 static char* read_file(const char* filename) {
     FILE* f = fopen(filename, "rb");
@@ -51,7 +52,7 @@ GatewayServer::GatewayServer() : HttpServer_(std::make_unique<HttpServer>(5003, 
 grpcClient_(std::make_shared<grpcClient>()),
 GatewayPubSubManager_(std::make_unique<GatewayPubSubManager>()), kafkaProducer_(std::make_shared<kafkaProducer>()) {
     this->HttpServer_->setHttpCallback([this] (TcpConnectionPtr conn, HttpRequest req) {
-        handleHttpEvent(conn, req, this->grpcClient_);
+        HttpEventHandlers::getInstance().handleHttpEvent(conn, req, this->grpcClient_);
     });
 
     this->HttpServer_->setUpgradeCallback([this] (const TcpConnectionPtr& conn, const HttpRequest& req) {

@@ -104,7 +104,7 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
 
         auto roomlist = GatewayPubSubManager::UserRoomLRU_.get(userid);
 
-        if(roomlist) {
+        if(roomlist.has_value()) {
             EventLoop* loop = wsContextPtr->getLoop();
 
             loop->runInLoop([wsContextPtr, roomlist = std::move(roomlist)] () {
@@ -124,9 +124,11 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
 
         } else {
 
-            client->rpcGetUserRoomListAsync(userid, [userid, wsContextPtr] (std::vector<std::string> roomlist) {
+            client->rpcGetUserRoomListAsync(userid, [userid, wsContextPtr, client] (std::vector<std::string> roomlist) {
 
-                if(!roomlist.empty()) GatewayPubSubManager::UserRoomLRU_.put(userid, roomlist);
+                if(roomlist.empty()) return;
+
+                GatewayPubSubManager::UserRoomLRU_.put(userid, roomlist);
 
 #if 0
                 for(const auto& roomid : roomlist) {
@@ -149,8 +151,6 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
 
                 }
 #elif 1
-                roomlist = {"f3909e6e-1bc4-11f1-a7fa-000c29dfa7f1",
-                            "3a0db02c-1bc3-11f1-a7fa-000c29dfa7f1"};
 
                 EventLoop* loop = wsContextPtr->getLoop();
 
@@ -173,8 +173,8 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
             });
         }
 
-        client->rpcinitialPullMessageAsync(wsContextPtr->userid(), wsContextPtr->username(), 10, 
-        [wsContextPtr] (std::string msg) { wsContextPtr->send(buildWebSocketFrame(msg, 0x02)); });
+        // client->rpcinitialPullMessageAsync(wsContextPtr->userid(), wsContextPtr->username(), 10, 
+        // [wsContextPtr] (std::string msg) { wsContextPtr->send(buildWebSocketFrame(msg, 0x02)); });
 
         wsContextPtr->setWebconnCloseCallback([wsContextPtr] () {
             if(!wsContextPtr->connected()) return;
@@ -288,6 +288,22 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
                         client->rpcCilentMessageAsync(message, wsContextPtr->userid(), wsContextPtr->username(), 
                         [wsContextPtr] (std::string msg) {
                             wsContextPtr->send(buildWebSocketFrame(msg, 0x02));
+                        });
+
+                        break;
+                    }
+
+                    case ChatApp::AnyPayload_BatchPullMessagePayload: {
+                        auto payload = rootMsg->payload_as_BatchPullMessagePayload();
+                        auto rooms = payload->rooms();
+
+                        if(rooms->size() == 0) {
+                            wsContextPtr->send(buildWebSocketFrame("", 0x02));
+                            break;
+                        }
+
+                        client->rpcBathPullMessageAsync(message, [wsContextPtr] (const std::string& pulled_msg) {
+                            wsContextPtr->send(buildWebSocketFrame(pulled_msg, 0x02));
                         });
 
                         break;

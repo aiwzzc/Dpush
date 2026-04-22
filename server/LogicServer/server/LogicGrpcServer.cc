@@ -7,6 +7,18 @@
 
 #include <memory>
 
+namespace {
+
+template <typename... Args>
+std::string FormatString(const std::string &format, Args... args) {
+    auto size = std::snprintf(nullptr, 0, format.c_str(), args...) + 1; // Extra space for '\0'
+    std::unique_ptr<char[]> buf(new char[size]);
+    std::snprintf(buf.get(), size, format.c_str(), args...);
+    return std::string(buf.get(), buf.get() + size - 1); // We don't want the '\0' inside
+}
+
+};
+
 LogicGrpcServer::LogicGrpcServer(MySQLConnPool* mysql, sw::redis::Redis* redis, ComputeThreadPool* thread) : 
 mysql_pool_(mysql), redis_pool_(redis), thread_pool_(thread) {}
 LogicGrpcServer::~LogicGrpcServer() = default;
@@ -192,6 +204,39 @@ struct GetHistoryMessageAwaiter {
 
 };
 
+struct PullMessageAwaiter {
+
+    using streamMsg = std::pair<std::string, std::unordered_map<std::string, std::string>>;
+
+    sw::redis::Redis* redis_;
+    ComputeThreadPool* thread_pool_;
+    std::string_view room_id_;
+    int64_t message_id_;
+    std::vector<streamMsg> messages_;
+
+    bool await_ready() const noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> handle) {
+        this->thread_pool_->submit([this, handle] () {
+            std::string messageKey = "{" + std::string(this->room_id_.data(), this->room_id_.size()) + "}";
+            std::string stream_ref;
+            int get_count = 50;
+
+            if(message_id_) {
+                stream_ref = "(" + std::to_string(message_id_);
+                this->redis_->xrange(messageKey, stream_ref, "+", get_count, std::back_inserter(this->messages_));
+
+            } else {
+                stream_ref = "+";
+                this->redis_->xrevrange(messageKey, stream_ref, "-", get_count, std::back_inserter(this->messages_));
+            }
+
+            handle.resume();
+        });
+    }
+
+    std::vector<streamMsg> await_resume() { return this->messages_; }
+};
+
 QueryAwaiter async_query_for_coro(MySQLConnPool* pool, const std::string& sql, SQLOperation::SQLType type) {
     return QueryAwaiter{pool, sql, type, {}};
 }
@@ -218,6 +263,10 @@ const std::string& roomid, std::unordered_map<std::string, std::string>& cursors
     return GetHistoryMessageAwaiter{threadpool, redis, userid, roomid, cursors, messagecount, {}};
 }
 
+PullMessageAwaiter async_PullMessage_for_coro(sw::redis::Redis* redis, ComputeThreadPool* threadpool, std::string_view room_id, int64_t& msgid) {
+    return PullMessageAwaiter{redis, threadpool, room_id, msgid, {}};
+}
+
 DetachedTask LogicGrpcServer::DoinitialPullMessage(grpc::ServerUnaryReactor* reatcor, const logic::pullMessageRequest* request, 
     logic::pullMessageResponse* response) {
 
@@ -228,6 +277,8 @@ DetachedTask LogicGrpcServer::DoinitialPullMessage(grpc::ServerUnaryReactor* rea
     bool ok = co_await async_getRoomList_for_coro(request->userid(), &roomlist, this->thread_pool_);
 
     if (roomlist.empty()) {
+        response->set_message("");
+
         reatcor->Finish(grpc::Status::OK);
         co_return;
     }
@@ -345,6 +396,12 @@ DetachedTask LogicGrpcServer::DoclientMessage(grpc::ServerUnaryReactor* reactor,
         case ChatApp::AnyPayload_PullMissingMessagePayload: {
             auto payload = rootMsg->payload_as_PullMissingMessagePayload();
 
+            int32_t userid = request->userid();
+            std::string useridStr = std::to_string(userid);
+            std::string username{request->username()};
+
+            std::string_view room_id(payload->room_id()->c_str(), payload->room_id()->size());
+            auto miss_ids = payload->missing_message_ids();
 
             co_return;
         }
@@ -437,6 +494,156 @@ DetachedTask LogicGrpcServer::DoclearCursors(grpc::ServerUnaryReactor* reactor, 
 
     int32_t userid = request->userid();
     bool ok = co_await async_clearCursors_for_coro(this->redis_pool_, this->thread_pool_, userid);
+
+    reactor->Finish(grpc::Status::OK);
+}
+
+BatchPullReactor::BatchPullReactor(const logic::bathPullMessageRequest* req, sw::redis::Redis* redis, ComputeThreadPool* threadpool) :
+request_(req), redis_pool_(redis), thread_pool_(threadpool) {
+    this->FetchNextAndWrite();
+}
+
+void BatchPullReactor::OnWriteDone(bool ok) {
+    if(!ok) {
+        Finish(::grpc::Status::CANCELLED);
+        return;
+    }
+
+    this->FetchNextAndWrite();
+}
+
+void BatchPullReactor::OnDone() {
+    delete this;
+}
+
+DetachedTask BatchPullReactor::FetchNextAndWrite() {
+    auto rootMsg = ChatApp::GetRootMessage(this->request_->message().data());
+
+    auto payload = rootMsg->payload_as_BatchPullMessagePayload();
+    auto rooms = payload->rooms();
+
+    if(this->current_index_ >= rooms->size()) {
+        Finish(::grpc::Status::OK);
+        co_return;
+    }
+
+    auto item = rooms->Get(this->current_index_++);
+
+    std::string_view room_id(item->room_id()->c_str(), item->room_id()->size());
+    int64_t last_message_id = item->last_message_id();
+
+    auto messages = co_await async_PullMessage_for_coro(this->redis_pool_, this->thread_pool_, room_id, last_message_id);
+    
+    std::string batch_msg;
+    for(auto& message : messages) {
+        for(auto it = message.second.begin(); it != message.second.end(); ++it) {
+            batch_msg.append(it->second);
+        }
+    }
+
+    this->response_.set_message(batch_msg);
+
+    StartWrite(&this->response_);
+}
+
+grpc::ServerWriteReactor<logic::bathPullMessageResponse>* LogicGrpcServer::bathPullMessage(grpc::CallbackServerContext* context,
+    const logic::bathPullMessageRequest* request) {
+
+    return new BatchPullReactor(request, this->redis_pool_, this->thread_pool_);
+}
+
+grpc::ServerUnaryReactor* LogicGrpcServer::joinSession(grpc::CallbackServerContext* context, const logic::joinSessionRequest* request, 
+    logic::joinSessionResponse* response) {
+
+    grpc::ServerUnaryReactor* reactor = context->DefaultReactor();
+
+    DojoinSession(reactor, request, response);
+
+    return reactor;
+}
+
+DetachedTask LogicGrpcServer::DojoinSession(grpc::ServerUnaryReactor* reactor, const logic::joinSessionRequest* request, 
+    logic::joinSessionResponse* response) {
+
+    int userid = request->userid();
+    std::string roomname = request->roomname();
+
+    // mysql get room_id
+    std::string sql = FormatString("select room_id from room_info where room_name = '%s'", roomname.c_str());
+    SQLResult result = co_await async_query_for_coro(this->mysql_pool_, sql, SQLOperation::SQLType::QUERY);
+
+    if(result.empty()) {
+        response->set_message("");
+
+        reactor->Finish(grpc::Status::OK);
+        co_return;
+    }
+
+    // get flatbuffer to Gateway and redis publish
+    std::string room_id = result[0][0];
+    int64_t msg_id = 0;
+
+    auto messages = co_await async_PullMessage_for_coro(this->redis_pool_, this->thread_pool_, room_id, msg_id);
+
+    thread_local flatbuffers::FlatBufferBuilder builder(4096);
+    builder.Clear();
+
+    std::vector<flatbuffers::Offset<ChatApp::ServerMessageItem>> new_item_offsets;
+
+    for(auto& message : messages) {
+        for(auto it = message.second.begin(); it != message.second.end(); ++it) {
+            auto rootMsg = ChatApp::GetRootMessage(it->second.data());
+            auto payload = rootMsg->payload_as_ServerMessagePayload();
+            auto old_messages = payload->messages();
+
+            for(int i = 0; i < old_messages->size(); ++i) {
+                auto old_item = old_messages->Get(i);
+
+                auto user = old_item->user();
+                auto username = builder.CreateString(user->username()->c_str());
+
+                ChatApp::UserBuilder userBuilder(builder);
+                userBuilder.add_userid(user->userid());
+                userBuilder.add_username(username);
+                auto new_user_offset = userBuilder.Finish();
+
+                auto client_message_id = builder.CreateString(old_item->client_message_id()->c_str());
+                auto content = builder.CreateString(old_item->content()->c_str());
+
+                ChatApp::ServerMessageItemBuilder serverMessageItemBuilder(builder);
+                serverMessageItemBuilder.add_client_message_id(client_message_id);
+                serverMessageItemBuilder.add_content(content);
+                serverMessageItemBuilder.add_server_message_id(old_item->server_message_id());
+                serverMessageItemBuilder.add_timestamp(old_item->timestamp());
+                serverMessageItemBuilder.add_user(new_user_offset);
+
+                new_item_offsets.push_back(serverMessageItemBuilder.Finish());
+            }
+        }
+    }
+
+    auto new_room_id = builder.CreateString(room_id);
+    auto new_roomname = builder.CreateString(roomname);
+    auto new_messages_vector = builder.CreateVector(new_item_offsets);
+
+    ChatApp::JoinSessionPayloadBuilder joinBuilder(builder);
+    joinBuilder.add_room_id(new_room_id);
+    joinBuilder.add_roomname(new_roomname);
+    joinBuilder.add_messages(new_messages_vector);
+    auto joinPayloadOffset = joinBuilder.Finish();
+
+    ChatApp::RootMessageBuilder rootMsgBuilder(builder);
+    rootMsgBuilder.add_payload_type(ChatApp::AnyPayload_JoinSessionPayload);
+    rootMsgBuilder.add_payload(joinPayloadOffset.Union());
+    auto rootMsgOffset = rootMsgBuilder.Finish();
+
+    builder.Finish(rootMsgOffset);
+    const char* data = reinterpret_cast<const char*>(builder.GetBufferPointer());
+    std::size_t size = builder.GetSize();
+
+    response->set_message(std::string(data, size));
+
+    this->redis_pool_->publish("room1:" + room_id, std::to_string(userid));
 
     reactor->Finish(grpc::Status::OK);
 }

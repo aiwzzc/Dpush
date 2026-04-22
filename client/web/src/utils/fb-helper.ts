@@ -6,7 +6,9 @@ import {
   ClientMessageItem,
   MsgContentType,
   PullMissingMessagePayload,
-  RequestRoomHistoryPayload
+  RequestRoomHistoryPayload,
+  BatchPullMessagePayload,
+  BatchPullMessageItem
 } from '../generated/chat_app';
 
 export function encodeClientMessage(roomId: string, clientMessageId: string, content: string, msgType: 'text' | 'image' = 'text', imageUrl?: string): Uint8Array {
@@ -77,6 +79,32 @@ export function encodeRequestRoomHistory(roomId: string, firstMessageId: string,
 
   RootMessage.startRootMessage(builder);
   RootMessage.addPayloadType(builder, AnyPayload.RequestRoomHistoryPayload);
+  RootMessage.addPayload(builder, payloadOffset);
+  const rootOffset = RootMessage.endRootMessage(builder);
+
+  builder.finish(rootOffset);
+  return builder.asUint8Array();
+}
+
+export function encodeBatchPullMessage(roomMaxIds: { roomId: string, maxId: number }[]): Uint8Array {
+  const builder = new flatbuffers.Builder(1024);
+
+  const itemOffsets = roomMaxIds.map(rm => {
+    const roomIdOffset = builder.createString(rm.roomId);
+    BatchPullMessageItem.startBatchPullMessageItem(builder);
+    BatchPullMessageItem.addRoomId(builder, roomIdOffset);
+    BatchPullMessageItem.addLastMessageId(builder, BigInt(rm.maxId));
+    return BatchPullMessageItem.endBatchPullMessageItem(builder);
+  });
+
+  const roomsVectorOffset = BatchPullMessagePayload.createRoomsVector(builder, itemOffsets);
+
+  BatchPullMessagePayload.startBatchPullMessagePayload(builder);
+  BatchPullMessagePayload.addRooms(builder, roomsVectorOffset);
+  const payloadOffset = BatchPullMessagePayload.endBatchPullMessagePayload(builder);
+
+  RootMessage.startRootMessage(builder);
+  RootMessage.addPayloadType(builder, AnyPayload.BatchPullMessagePayload);
   RootMessage.addPayload(builder, payloadOffset);
   const rootOffset = RootMessage.endRootMessage(builder);
 

@@ -42,6 +42,12 @@ struct ServerMessagePayloadBuilder;
 struct PullMissingMessagePayload;
 struct PullMissingMessagePayloadBuilder;
 
+struct BatchPullMessageItem;
+struct BatchPullMessageItemBuilder;
+
+struct BatchPullMessagePayload;
+struct BatchPullMessagePayloadBuilder;
+
 struct RequestRoomHistoryPayload;
 struct RequestRoomHistoryPayloadBuilder;
 
@@ -56,6 +62,9 @@ struct HelloMessagePayloadBuilder;
 
 struct StreamMessagePayload;
 struct StreamMessagePayloadBuilder;
+
+struct JoinSessionPayload;
+struct JoinSessionPayloadBuilder;
 
 struct RootMessage;
 struct RootMessageBuilder;
@@ -99,21 +108,25 @@ inline const char *EnumNameMsgContentType(MsgContentType e) {
 enum AnyPayload : uint8_t {
   AnyPayload_NONE = 0,
   AnyPayload_HelloMessagePayload = 1,
-  AnyPayload_ClientMessagePayload = 2,
-  AnyPayload_ServerMessagePayload = 3,
-  AnyPayload_RequestRoomHistoryPayload = 4,
-  AnyPayload_RequestMessagePayload = 5,
-  AnyPayload_PullMissingMessagePayload = 6,
-  AnyPayload_MessageAckPayload = 7,
-  AnyPayload_StreamMessagePayload = 8,
+  AnyPayload_BatchPullMessagePayload = 2,
+  AnyPayload_JoinSessionPayload = 3,
+  AnyPayload_ClientMessagePayload = 4,
+  AnyPayload_ServerMessagePayload = 5,
+  AnyPayload_RequestRoomHistoryPayload = 6,
+  AnyPayload_RequestMessagePayload = 7,
+  AnyPayload_PullMissingMessagePayload = 8,
+  AnyPayload_MessageAckPayload = 9,
+  AnyPayload_StreamMessagePayload = 10,
   AnyPayload_MIN = AnyPayload_NONE,
   AnyPayload_MAX = AnyPayload_StreamMessagePayload
 };
 
-inline const AnyPayload (&EnumValuesAnyPayload())[9] {
+inline const AnyPayload (&EnumValuesAnyPayload())[11] {
   static const AnyPayload values[] = {
     AnyPayload_NONE,
     AnyPayload_HelloMessagePayload,
+    AnyPayload_BatchPullMessagePayload,
+    AnyPayload_JoinSessionPayload,
     AnyPayload_ClientMessagePayload,
     AnyPayload_ServerMessagePayload,
     AnyPayload_RequestRoomHistoryPayload,
@@ -126,9 +139,11 @@ inline const AnyPayload (&EnumValuesAnyPayload())[9] {
 }
 
 inline const char * const *EnumNamesAnyPayload() {
-  static const char * const names[10] = {
+  static const char * const names[12] = {
     "NONE",
     "HelloMessagePayload",
+    "BatchPullMessagePayload",
+    "JoinSessionPayload",
     "ClientMessagePayload",
     "ServerMessagePayload",
     "RequestRoomHistoryPayload",
@@ -153,6 +168,14 @@ template<typename T> struct AnyPayloadTraits {
 
 template<> struct AnyPayloadTraits<ChatApp::HelloMessagePayload> {
   static const AnyPayload enum_value = AnyPayload_HelloMessagePayload;
+};
+
+template<> struct AnyPayloadTraits<ChatApp::BatchPullMessagePayload> {
+  static const AnyPayload enum_value = AnyPayload_BatchPullMessagePayload;
+};
+
+template<> struct AnyPayloadTraits<ChatApp::JoinSessionPayload> {
+  static const AnyPayload enum_value = AnyPayload_JoinSessionPayload;
 };
 
 template<> struct AnyPayloadTraits<ChatApp::ClientMessagePayload> {
@@ -897,6 +920,121 @@ inline flatbuffers::Offset<PullMissingMessagePayload> CreatePullMissingMessagePa
       missing_message_ids__);
 }
 
+struct BatchPullMessageItem FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef BatchPullMessageItemBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_ROOM_ID = 4,
+    VT_LAST_MESSAGE_ID = 6
+  };
+  const flatbuffers::String *room_id() const {
+    return GetPointer<const flatbuffers::String *>(VT_ROOM_ID);
+  }
+  int64_t last_message_id() const {
+    return GetField<int64_t>(VT_LAST_MESSAGE_ID, 0);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_ROOM_ID) &&
+           verifier.VerifyString(room_id()) &&
+           VerifyField<int64_t>(verifier, VT_LAST_MESSAGE_ID, 8) &&
+           verifier.EndTable();
+  }
+};
+
+struct BatchPullMessageItemBuilder {
+  typedef BatchPullMessageItem Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_room_id(flatbuffers::Offset<flatbuffers::String> room_id) {
+    fbb_.AddOffset(BatchPullMessageItem::VT_ROOM_ID, room_id);
+  }
+  void add_last_message_id(int64_t last_message_id) {
+    fbb_.AddElement<int64_t>(BatchPullMessageItem::VT_LAST_MESSAGE_ID, last_message_id, 0);
+  }
+  explicit BatchPullMessageItemBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  flatbuffers::Offset<BatchPullMessageItem> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<BatchPullMessageItem>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<BatchPullMessageItem> CreateBatchPullMessageItem(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    flatbuffers::Offset<flatbuffers::String> room_id = 0,
+    int64_t last_message_id = 0) {
+  BatchPullMessageItemBuilder builder_(_fbb);
+  builder_.add_last_message_id(last_message_id);
+  builder_.add_room_id(room_id);
+  return builder_.Finish();
+}
+
+inline flatbuffers::Offset<BatchPullMessageItem> CreateBatchPullMessageItemDirect(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    const char *room_id = nullptr,
+    int64_t last_message_id = 0) {
+  auto room_id__ = room_id ? _fbb.CreateString(room_id) : 0;
+  return ChatApp::CreateBatchPullMessageItem(
+      _fbb,
+      room_id__,
+      last_message_id);
+}
+
+struct BatchPullMessagePayload FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef BatchPullMessagePayloadBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_ROOMS = 4
+  };
+  const flatbuffers::Vector<flatbuffers::Offset<ChatApp::BatchPullMessageItem>> *rooms() const {
+    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<ChatApp::BatchPullMessageItem>> *>(VT_ROOMS);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_ROOMS) &&
+           verifier.VerifyVector(rooms()) &&
+           verifier.VerifyVectorOfTables(rooms()) &&
+           verifier.EndTable();
+  }
+};
+
+struct BatchPullMessagePayloadBuilder {
+  typedef BatchPullMessagePayload Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_rooms(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<ChatApp::BatchPullMessageItem>>> rooms) {
+    fbb_.AddOffset(BatchPullMessagePayload::VT_ROOMS, rooms);
+  }
+  explicit BatchPullMessagePayloadBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  flatbuffers::Offset<BatchPullMessagePayload> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<BatchPullMessagePayload>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<BatchPullMessagePayload> CreateBatchPullMessagePayload(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<ChatApp::BatchPullMessageItem>>> rooms = 0) {
+  BatchPullMessagePayloadBuilder builder_(_fbb);
+  builder_.add_rooms(rooms);
+  return builder_.Finish();
+}
+
+inline flatbuffers::Offset<BatchPullMessagePayload> CreateBatchPullMessagePayloadDirect(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    const std::vector<flatbuffers::Offset<ChatApp::BatchPullMessageItem>> *rooms = nullptr) {
+  auto rooms__ = rooms ? _fbb.CreateVector<flatbuffers::Offset<ChatApp::BatchPullMessageItem>>(*rooms) : 0;
+  return ChatApp::CreateBatchPullMessagePayload(
+      _fbb,
+      rooms__);
+}
+
 struct RequestRoomHistoryPayload FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   typedef RequestRoomHistoryPayloadBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -1285,6 +1423,86 @@ inline flatbuffers::Offset<StreamMessagePayload> CreateStreamMessagePayloadDirec
       timestamp);
 }
 
+struct JoinSessionPayload FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef JoinSessionPayloadBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_ROOM_ID = 4,
+    VT_ROOMNAME = 6,
+    VT_MESSAGES = 8
+  };
+  const flatbuffers::String *room_id() const {
+    return GetPointer<const flatbuffers::String *>(VT_ROOM_ID);
+  }
+  const flatbuffers::String *roomname() const {
+    return GetPointer<const flatbuffers::String *>(VT_ROOMNAME);
+  }
+  const flatbuffers::Vector<flatbuffers::Offset<ChatApp::ServerMessageItem>> *messages() const {
+    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<ChatApp::ServerMessageItem>> *>(VT_MESSAGES);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_ROOM_ID) &&
+           verifier.VerifyString(room_id()) &&
+           VerifyOffset(verifier, VT_ROOMNAME) &&
+           verifier.VerifyString(roomname()) &&
+           VerifyOffset(verifier, VT_MESSAGES) &&
+           verifier.VerifyVector(messages()) &&
+           verifier.VerifyVectorOfTables(messages()) &&
+           verifier.EndTable();
+  }
+};
+
+struct JoinSessionPayloadBuilder {
+  typedef JoinSessionPayload Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_room_id(flatbuffers::Offset<flatbuffers::String> room_id) {
+    fbb_.AddOffset(JoinSessionPayload::VT_ROOM_ID, room_id);
+  }
+  void add_roomname(flatbuffers::Offset<flatbuffers::String> roomname) {
+    fbb_.AddOffset(JoinSessionPayload::VT_ROOMNAME, roomname);
+  }
+  void add_messages(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<ChatApp::ServerMessageItem>>> messages) {
+    fbb_.AddOffset(JoinSessionPayload::VT_MESSAGES, messages);
+  }
+  explicit JoinSessionPayloadBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  flatbuffers::Offset<JoinSessionPayload> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<JoinSessionPayload>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<JoinSessionPayload> CreateJoinSessionPayload(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    flatbuffers::Offset<flatbuffers::String> room_id = 0,
+    flatbuffers::Offset<flatbuffers::String> roomname = 0,
+    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<ChatApp::ServerMessageItem>>> messages = 0) {
+  JoinSessionPayloadBuilder builder_(_fbb);
+  builder_.add_messages(messages);
+  builder_.add_roomname(roomname);
+  builder_.add_room_id(room_id);
+  return builder_.Finish();
+}
+
+inline flatbuffers::Offset<JoinSessionPayload> CreateJoinSessionPayloadDirect(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    const char *room_id = nullptr,
+    const char *roomname = nullptr,
+    const std::vector<flatbuffers::Offset<ChatApp::ServerMessageItem>> *messages = nullptr) {
+  auto room_id__ = room_id ? _fbb.CreateString(room_id) : 0;
+  auto roomname__ = roomname ? _fbb.CreateString(roomname) : 0;
+  auto messages__ = messages ? _fbb.CreateVector<flatbuffers::Offset<ChatApp::ServerMessageItem>>(*messages) : 0;
+  return ChatApp::CreateJoinSessionPayload(
+      _fbb,
+      room_id__,
+      roomname__,
+      messages__);
+}
+
 struct RootMessage FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   typedef RootMessageBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -1300,6 +1518,12 @@ struct RootMessage FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   template<typename T> const T *payload_as() const;
   const ChatApp::HelloMessagePayload *payload_as_HelloMessagePayload() const {
     return payload_type() == ChatApp::AnyPayload_HelloMessagePayload ? static_cast<const ChatApp::HelloMessagePayload *>(payload()) : nullptr;
+  }
+  const ChatApp::BatchPullMessagePayload *payload_as_BatchPullMessagePayload() const {
+    return payload_type() == ChatApp::AnyPayload_BatchPullMessagePayload ? static_cast<const ChatApp::BatchPullMessagePayload *>(payload()) : nullptr;
+  }
+  const ChatApp::JoinSessionPayload *payload_as_JoinSessionPayload() const {
+    return payload_type() == ChatApp::AnyPayload_JoinSessionPayload ? static_cast<const ChatApp::JoinSessionPayload *>(payload()) : nullptr;
   }
   const ChatApp::ClientMessagePayload *payload_as_ClientMessagePayload() const {
     return payload_type() == ChatApp::AnyPayload_ClientMessagePayload ? static_cast<const ChatApp::ClientMessagePayload *>(payload()) : nullptr;
@@ -1333,6 +1557,14 @@ struct RootMessage FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
 
 template<> inline const ChatApp::HelloMessagePayload *RootMessage::payload_as<ChatApp::HelloMessagePayload>() const {
   return payload_as_HelloMessagePayload();
+}
+
+template<> inline const ChatApp::BatchPullMessagePayload *RootMessage::payload_as<ChatApp::BatchPullMessagePayload>() const {
+  return payload_as_BatchPullMessagePayload();
+}
+
+template<> inline const ChatApp::JoinSessionPayload *RootMessage::payload_as<ChatApp::JoinSessionPayload>() const {
+  return payload_as_JoinSessionPayload();
 }
 
 template<> inline const ChatApp::ClientMessagePayload *RootMessage::payload_as<ChatApp::ClientMessagePayload>() const {
@@ -1401,6 +1633,14 @@ inline bool VerifyAnyPayload(flatbuffers::Verifier &verifier, const void *obj, A
     }
     case AnyPayload_HelloMessagePayload: {
       auto ptr = reinterpret_cast<const ChatApp::HelloMessagePayload *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case AnyPayload_BatchPullMessagePayload: {
+      auto ptr = reinterpret_cast<const ChatApp::BatchPullMessagePayload *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case AnyPayload_JoinSessionPayload: {
+      auto ptr = reinterpret_cast<const ChatApp::JoinSessionPayload *>(obj);
       return verifier.VerifyTable(ptr);
     }
     case AnyPayload_ClientMessagePayload: {

@@ -23,12 +23,30 @@ Status RoomServer::JoinRoom(::grpc::ServerContext* context, const ::room::JoinRo
     ::room::JoinRoomResponse* response) {
 
     std::string userid = std::to_string(request->userid());
-    bool exists = this->redis_pool_->sismember(userid, request->room_id());
 
-    if(!exists) {
-        this->redis_pool_->sadd(userid, request->room_id());
-        this->redis_pool_->sadd(request->room_id(), userid);
+    this->redis_pool_->sadd(userid, request->room_id());
+    this->redis_pool_->sadd(request->room_id(), userid);
+
+    response->set_code(0);
+    response->set_error_msg("ok");
+
+    return Status::OK;
+}
+
+Status RoomServer::JoinRooms(::grpc::ServerContext* context, ::grpc::ServerReader<::room::JoinRoomRequest>* reader, 
+    ::room::JoinRoomResponse* response) {
+
+    ::room::JoinRoomRequest req;
+
+    while(reader->Read(&req)) {
+        std::string userid = std::to_string(req.userid());
+
+        this->redis_pool_->sadd(userid, req.room_id());
+        this->redis_pool_->sadd(req.room_id(), userid);
     }
+
+    response->set_code(0);
+    response->set_error_msg("ok");
 
     return Status::OK;
 }
