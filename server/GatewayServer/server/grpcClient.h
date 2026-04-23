@@ -56,15 +56,16 @@ public:
 
     void rpcLoginAsync(const HttpRequest&, int& errcode, std::string& errmsg, std::function<void(LogicInfo)>);
     void rpcRegisterAsync(const HttpRequest&, int& errcode, std::string& errmsg, std::function<void(RegisterInfo)>);
-    void rpcinitialPullMessageAsync(int32_t userid, std::string username, const int messagecount,
-    std::function<void(std::string)> callback);
     void rpcCilentMessageAsync(const std::string& message, int32_t userid, std::string username, 
     std::function<void(std::string)> callback);
     void rpcclearCursorsAsync(int32_t userid, std::function<void()>);
-    void rpcGetUserRoomListAsync(int32_t userid, std::function<void(std::vector<std::string>)>);
-    void rpcJoinRoomAsync(int32_t userid, const std::string& room_id, const std::function<void(int)>&);
+    void rpcGetUserRoomListAsync(int32_t userid, const std::function<void(std::vector<std::string>&)>&);
+    void rpcJoinSessionAsync(int32_t userid, const std::string& roomname, const std::function<void(int, const std::string&, int64_t)>&);
+    void rpcCreateSessionAsync(int32_t userid, const std::string& roomname, const std::function<void(int32_t, const std::string&, int64_t)>&);
     void rpcJoinRooms(int32_t userid, std::vector<std::string>& rooms);
     void rpcBathPullMessageAsync(const std::string& message, std::function<void(const std::string&)> callback);
+    void rpcIsSubSessionAsync(int32_t userid, std::string& room_id, const std::function<void(const std::string&)>& callback);
+    void rpcPullMessageAsync(int64_t roomid, std::string& roomname, const std::function<void(const std::string&)>& callback);
 
     static std::string api_error_id_to_string(api_error_id id);
     static std::optional<api_error_id> to_api_error_id(int v);

@@ -102,79 +102,42 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
 
         client->rpcclearCursorsAsync(userid, [] () { return; });
 
-        auto roomlist = GatewayPubSubManager::UserRoomLRU_.get(userid);
+        client->rpcGetUserRoomListAsync(userid, [userid, wsContextPtr, client] (std::vector<std::string>& roomlist) {
 
-        if(roomlist.has_value()) {
+            if(roomlist.empty()) return;
+
+#if 0
+            for(const auto& roomid : roomlist) {
+
+                bool needSubscribeToRedisPub = false;
+
+                {
+                    std::size_t bucketIndex = std::hash<std::string>{}(roomid) % BUCKET_NUM;
+                    auto& bucket = GatewayPubSubManager::roomBuckets[bucketIndex];
+
+                    std::lock_guard<std::mutex> lock(bucket.mtx_);
+
+                    auto& conns = bucket.roomHash_[roomid];
+                    if(conns.empty()) needSubscribeToRedisPub = true;
+
+                    conns.insert(wsContextPtr);
+                }
+
+                if(needSubscribeToRedisPub) GatewayPubSubManager::SubscribeRoomSafe(roomid);
+
+            }
+#elif 1
+
             EventLoop* loop = wsContextPtr->getLoop();
 
             loop->runInLoop([wsContextPtr, roomlist = std::move(roomlist)] () {
-                for(const auto& roomid : roomlist.value()) {
-                    bool needSubscribeToRedisPub = false;
-
-                    auto& conns = LocalWebsockConnRoomhash[roomid];
-                    if(conns.empty()) needSubscribeToRedisPub = true;
-
-                    wsContextPtr->room_index_ = conns.size();
-                    conns.push_back(wsContextPtr);
-                    if(needSubscribeToRedisPub) GatewayPubSubManager::SubscribeRoomSafe(roomid);
-
-                    wsContextPtr->addRoom(roomid);
-                }
-            });
-
-        } else {
-
-            client->rpcGetUserRoomListAsync(userid, [userid, wsContextPtr, client] (std::vector<std::string> roomlist) {
-
-                if(roomlist.empty()) return;
-
-                GatewayPubSubManager::UserRoomLRU_.put(userid, roomlist);
-
-#if 0
                 for(const auto& roomid : roomlist) {
-
-                    bool needSubscribeToRedisPub = false;
-
-                    {
-                        std::size_t bucketIndex = std::hash<std::string>{}(roomid) % BUCKET_NUM;
-                        auto& bucket = GatewayPubSubManager::roomBuckets[bucketIndex];
-
-                        std::lock_guard<std::mutex> lock(bucket.mtx_);
-
-                        auto& conns = bucket.roomHash_[roomid];
-                        if(conns.empty()) needSubscribeToRedisPub = true;
-
-                        conns.insert(wsContextPtr);
-                    }
-
-                    if(needSubscribeToRedisPub) GatewayPubSubManager::SubscribeRoomSafe(roomid);
-
+                    WebsocketConn::SubscribeSession(wsContextPtr, roomid);
                 }
-#elif 1
-
-                EventLoop* loop = wsContextPtr->getLoop();
-
-                loop->runInLoop([wsContextPtr, roomlist = std::move(roomlist)] () {
-                    for(const auto& roomid : roomlist) {
-                        bool needSubscribeToRedisPub = false;
-
-                        auto& conns = LocalWebsockConnRoomhash[roomid];
-                        if(conns.empty()) needSubscribeToRedisPub = true;
-
-                        wsContextPtr->room_index_ = conns.size();
-                        conns.push_back(wsContextPtr);
-                        if(needSubscribeToRedisPub) GatewayPubSubManager::SubscribeRoomSafe(roomid);
-
-                        wsContextPtr->addRoom(roomid);
-                    }
-                });
-#endif
-    
             });
-        }
+#endif
 
-        // client->rpcinitialPullMessageAsync(wsContextPtr->userid(), wsContextPtr->username(), 10, 
-        // [wsContextPtr] (std::string msg) { wsContextPtr->send(buildWebSocketFrame(msg, 0x02)); });
+        });
 
         wsContextPtr->setWebconnCloseCallback([wsContextPtr] () {
             if(!wsContextPtr->connected()) return;
@@ -209,19 +172,17 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
                     LocalWebsockConnhash.erase(userid);
                 }
 
-                std::vector<std::string> myRooms = wsContextPtr->getjoinedRooms();
-                for(const auto& roomid : myRooms) {
+                const std::unordered_map<std::string, int>& myRooms = wsContextPtr->getjoinedRooms();
+                for(const auto& [roomid, room_index] : myRooms) {
                     auto it = LocalWebsockConnRoomhash.find(roomid);
-                    auto& conns = it->second;
-
                     if(it != LocalWebsockConnRoomhash.end()) {
-                        int room_index = wsContextPtr->room_index_;
+                        auto& conns = it->second;
 
                         if(room_index >= 0 && room_index < conns.size()) {
                             conns[room_index] = conns.back();
-                            conns[room_index]->room_index_ = room_index;
+                            conns[room_index]->setRoomIndex(roomid, room_index);
                             conns.pop_back();
-                            wsContextPtr->room_index_ = -1;
+                            wsContextPtr->setRoomIndex(roomid, -1);
                         }
 
                         if(conns.empty()) {
@@ -305,6 +266,42 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
                         client->rpcBathPullMessageAsync(message, [wsContextPtr] (const std::string& pulled_msg) {
                             wsContextPtr->send(buildWebSocketFrame(pulled_msg, 0x02));
                         });
+
+                        break;
+                    }
+
+                    case ChatApp::AnyPayload_SignalingFromClientPayload: {
+                        auto payload = rootMsg->payload_as_SignalingFromClientPayload();
+                        std::string_view action_type_str(payload->action()->c_str(), payload->action()->size());
+                        if(action_type_str == "subscribe_room") {
+                            std::string room_id(payload->room_id()->c_str(), payload->room_id()->size());
+
+                            client->rpcIsSubSessionAsync(wsContextPtr->userid(), room_id, 
+                            [wsContextPtr, room_id] (const std::string& message) {
+                                wsContextPtr->send(buildWebSocketFrame(message, 0x02));
+
+                                WebsocketConn::SubscribeSession(wsContextPtr, room_id);
+                            });
+                        }
+
+                        break;
+                    }
+
+                    case ChatApp::AnyPayload_SignalingFromClientJoinPayload: {
+                        auto payload = rootMsg->payload_as_SignalingFromClientJoinPayload();
+                        std::string_view action_type_str(payload->action()->c_str(), payload->action()->size());
+                        if(action_type_str == "join_room") {
+                            std::string room_id(payload->room_id()->c_str(), payload->room_id()->size());
+                            int64_t roomid = std::stol(room_id);
+                            std::string room_name(payload->room_name()->c_str(), payload->room_name()->size());
+
+                            client->rpcPullMessageAsync(roomid, room_name, 
+                            [wsContextPtr, room_id] (const std::string& message) {
+                                wsContextPtr->send(buildWebSocketFrame(message, 0x02));
+
+                                WebsocketConn::SubscribeSession(wsContextPtr, room_id);
+                            });
+                        }
 
                         break;
                     }

@@ -46,7 +46,7 @@ public:
 
     static void register_api(HttpEventContext& ctx);
     static void login_api(HttpEventContext& ctx);
-    static void joinsession_api(HttpEventContext& ctx);
-    static void newsession_api(HttpEventContext& ctx);
+    static void joinSession_api(HttpEventContext& ctx);
+    static void createSession_api(HttpEventContext& ctx);
 
 };

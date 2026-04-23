@@ -124,31 +124,6 @@ void grpcClient::rpcRegisterAsync(const HttpRequest& req, int& errcode, std::str
     });
 }
 
-void grpcClient::rpcinitialPullMessageAsync(int32_t userid, std::string username, const int messagecount,
-    std::function<void(std::string)> callback) {
-
-    auto request = std::make_shared<logic::pullMessageRequest>();
-    auto response = std::make_shared<logic::pullMessageResponse>();
-    auto context = std::make_shared<ClientContext>();
-
-    request->set_userid(userid);
-    request->set_username(std::move(username));
-    request->set_messagecount(messagecount);
-
-    auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
-    context->set_deadline(deadline);
-
-    this->Logicstub->async()->initialPullMessage(context.get(), request.get(), response.get(),
-    [request, response, context, callback] (grpc::Status s) {
-        if(s.ok() && !response->message().empty()) {
-            callback(response->message());
-
-        } else {
-            callback("");
-        }
-    });
-}
-
 void grpcClient::rpcCilentMessageAsync(const std::string& message, int32_t userid, std::string username,
     std::function<void(std::string)> callback) {
 
@@ -192,7 +167,7 @@ void grpcClient::rpcclearCursorsAsync(int32_t userid, std::function<void()> call
     });
 }
 
-void grpcClient::rpcGetUserRoomListAsync(int32_t userid, std::function<void(std::vector<std::string>)> callback) {
+void grpcClient::rpcGetUserRoomListAsync(int32_t userid, const std::function<void(std::vector<std::string>&)>& callback) {
 
     auto context = std::make_shared<ClientContext>();
     auto request = std::make_shared<room::GetUserRoomListRequest>();
@@ -204,17 +179,14 @@ void grpcClient::rpcGetUserRoomListAsync(int32_t userid, std::function<void(std:
     context->set_deadline(deadline);
 
     this->RoomStub->async()->GetUserRoomList(context.get(), request.get(), response.get(), 
-    [request, response, context, callback] (grpc::Status s) {
+    [request, response, context, callback = std::move(callback)] (grpc::Status s) {
         if(s.ok()) {
             std::vector<std::string> roomlist;
     
             for(const auto& roominfo : response->roomlist()) {
                 std::string roomid = roominfo.room_id();
-                std::size_t colon_pos = roomid.find(":");
-                if(colon_pos == std::string::npos) return ;
 
-                std::string real_roomid = roomid.substr(0, colon_pos);
-                roomlist.emplace_back(real_roomid);
+                roomlist.emplace_back(roomid);
             }
         
             callback(roomlist);
@@ -222,19 +194,33 @@ void grpcClient::rpcGetUserRoomListAsync(int32_t userid, std::function<void(std:
     });
 }
 
-void grpcClient::rpcJoinRoomAsync(int32_t userid, const std::string& room_id, const std::function<void(int)>& cb) {
+void grpcClient::rpcJoinSessionAsync(int32_t userid, const std::string& roomname, const std::function<void(int, const std::string&, int64_t)>& cb) {
     auto ctx = std::make_shared<ClientContext>();
-    auto request = std::make_shared<room::JoinRoomRequest>();
-    auto response = std::make_shared<room::JoinRoomResponse>();
+    auto request = std::make_shared<logic::joinSessionRequest>();
+    auto response = std::make_shared<logic::joinSessionResponse>();
 
     request->set_userid(userid);
-    request->set_room_id(std::move(room_id));
+    request->set_roomname(roomname);
 
-    this->RoomStub->async()->JoinRoom(ctx.get(), request.get(), response.get(), 
-    [ctx, request, response, cb] (::grpc::Status s) {
+    this->Logicstub->async()->joinSession(ctx.get(), request.get(), response.get(), 
+    [ctx, request, response, cb = std::move(cb)] (grpc::Status s) {
         if(s.ok()) {
-            cb(response->code());
+            cb(response->code(), response->error_msg(), response->roomid());
         }
+    });
+}
+
+void grpcClient::rpcCreateSessionAsync(int32_t userid, const std::string& roomname, const std::function<void(int32_t, const std::string&, int64_t)>& cb) {
+    auto ctx = std::make_shared<ClientContext>();
+    auto request = std::make_shared<logic::createSessionRequest>();
+    auto response = std::make_shared<logic::createSessionResponse>();
+
+    request->set_userid(userid);
+    request->set_roomname(roomname);
+
+    this->Logicstub->async()->createSession(ctx.get(), request.get(), response.get(), 
+    [ctx, request, response, cb = std::move(cb)] (grpc::Status s) {
+        cb(response->code(), response->error_msg(), response->roomid());
     });
 }
 
@@ -299,5 +285,36 @@ void grpcClient::rpcBathPullMessageAsync(const std::string& message, std::functi
         if(status.ok()) {
 
         }
+    });
+}
+
+void grpcClient::rpcIsSubSessionAsync(int32_t userid, std::string& room_id, const std::function<void(const std::string&)>& callback) {
+    auto ctx = std::make_shared<ClientContext>();
+    auto request = std::make_shared<room::IsSubRoomRequest>();
+    auto response = std::make_shared<room::IsSubRoomResponse>();
+
+    request->set_userid(userid);
+    request->set_room_id(room_id);
+
+    this->RoomStub->async()->IsSubRoom(ctx.get(), request.get(), response.get(), 
+    [ctx, request, response, callback = std::move(callback)] (grpc::Status s) {
+        if(s.ok()) {
+            callback(response->message());
+        }
+    });
+}
+
+void grpcClient::rpcPullMessageAsync(int64_t roomid, std::string& roomname, const std::function<void(const std::string&)>& callback) {
+    auto ctx = std::make_shared<ClientContext>();
+    auto request = std::make_shared<logic::PullMessageRequest>();
+    auto response = std::make_shared<logic::PullMessageResponse>();
+
+    request->set_roomid(roomid);
+    request->set_roomname(roomname);
+    request->set_messageid(0);
+
+    this->Logicstub->async()->pullMessage(ctx.get(), request.get(), response.get(),
+    [ctx, request, response, callback = std::move(callback)] (grpc::Status s) {
+        callback(response->message());
     });
 }

@@ -4,6 +4,7 @@
 #include "../../proto/room.pb.h"
 #include "../base/typeCommon.h"
 #include "../../flatbuffers/chat_generated.h"
+#include "../base/SnowflakeIdWorker.h"
 
 #include <memory>
 
@@ -237,6 +238,30 @@ struct PullMessageAwaiter {
     std::vector<streamMsg> await_resume() { return this->messages_; }
 };
 
+struct addSessionToRedisAwaiter {
+
+    sw::redis::Redis* redis_;
+    ComputeThreadPool* thread_pool_;
+    int32_t userid_;
+    int64_t room_id_;
+
+    bool await_ready() const noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> handle) {
+        this->thread_pool_->submit([this, handle] () {
+            auto pipe = this->redis_->pipeline();
+            std::string user_rooms_key = "{user:rooms:" + std::to_string(this->userid_) + "}";
+
+            pipe.sadd(user_rooms_key, std::to_string(this->room_id_));
+            pipe.expire(user_rooms_key, 604800);
+            pipe.exec();
+
+            handle.resume();
+        });
+    }
+
+    void await_resume() {}
+};
+
 QueryAwaiter async_query_for_coro(MySQLConnPool* pool, const std::string& sql, SQLOperation::SQLType type) {
     return QueryAwaiter{pool, sql, type, {}};
 }
@@ -267,114 +292,9 @@ PullMessageAwaiter async_PullMessage_for_coro(sw::redis::Redis* redis, ComputeTh
     return PullMessageAwaiter{redis, threadpool, room_id, msgid, {}};
 }
 
-DetachedTask LogicGrpcServer::DoinitialPullMessage(grpc::ServerUnaryReactor* reatcor, const logic::pullMessageRequest* request, 
-    logic::pullMessageResponse* response) {
-
-    std::string_view userid = std::to_string(request->userid());
-
-    std::unordered_map<std::string, std::string> roomlist;
-
-    bool ok = co_await async_getRoomList_for_coro(request->userid(), &roomlist, this->thread_pool_);
-
-    if (roomlist.empty()) {
-        response->set_message("");
-
-        reatcor->Finish(grpc::Status::OK);
-        co_return;
-    }
-
-    std::unordered_map<std::string, std::string> cursors = co_await async_GetUserCursors_for_coro(this->thread_pool_,
-    this->redis_pool_, userid.data());
-
-    std::vector<RoomDataCache> all_room_data;
-
-    for(auto it = roomlist.begin(); it != roomlist.end(); ++it) {
-        MessageBatch msgs = co_await async_GerHistoryMessage_for_coro(this->thread_pool_, this->redis_pool_,
-        userid.data(), it->first, cursors, request->messagecount());
-
-        all_room_data.emplace_back(it->first, it->second, msgs);
-    }
-
-    thread_local flatbuffers::FlatBufferBuilder builder(4096);
-    builder.Clear();
-
-    std::vector<flatbuffers::Offset<ChatApp::RoomItem>> roomItemOffsets;
-
-    for(auto& room_data : all_room_data) {
-        std::vector<flatbuffers::Offset<ChatApp::RoomMessageItem>> messageItem;
-
-        for(auto& message : room_data.msgs.messages) {
-            auto username = builder.CreateString(message.username);
-            auto content_str = builder.CreateString(message.content);
-            auto messageid_str = builder.CreateString(message.id);
-
-            ChatApp::UserBuilder UserBuilder(builder);
-            UserBuilder.add_userid(message.user_id);
-            UserBuilder.add_username(username);
-            auto Useroffset = UserBuilder.Finish();
-
-            ChatApp::RoomMessageItemBuilder RoomMessageBuilder(builder);
-            RoomMessageBuilder.add_user(Useroffset);
-            RoomMessageBuilder.add_content(content_str);
-            RoomMessageBuilder.add_id(messageid_str);
-            RoomMessageBuilder.add_timestamp(message.timestamp);
-            auto roomMsgOffset = RoomMessageBuilder.Finish();
-
-            messageItem.push_back(roomMsgOffset);
-        }
-
-        auto messages_vector = builder.CreateVector(messageItem);
-        auto roomid = builder.CreateString(room_data.room_id);
-        auto roomname = builder.CreateString(room_data.room_name);
-
-        ChatApp::RoomItemBuilder RoomItemBuilder(builder);
-        RoomItemBuilder.add_room_id(roomid);
-        RoomItemBuilder.add_roomname(roomname);
-        RoomItemBuilder.add_has_more_messages(room_data.msgs.has_more);
-        RoomItemBuilder.add_messages(messages_vector);
-        auto roomItemOffset = RoomItemBuilder.Finish();
-
-        roomItemOffsets.push_back(roomItemOffset);
-    }
-
-    auto rooms_vector = builder.CreateVector(roomItemOffsets);
-    auto my_username_str = builder.CreateString(request->username());
-
-    ChatApp::UserBuilder meBuilder(builder);
-    meBuilder.add_userid(request->userid());
-    meBuilder.add_username(my_username_str);
-
-    auto meOffset = meBuilder.Finish();
-
-    ChatApp::HelloMessagePayloadBuilder helloPayloadBuilder(builder);
-    helloPayloadBuilder.add_me(meOffset);
-    helloPayloadBuilder.add_rooms(rooms_vector);
-
-    auto helloPayloadOffset = helloPayloadBuilder.Finish();
-
-    ChatApp::RootMessageBuilder rootBuilder(builder);
-    rootBuilder.add_payload_type(ChatApp::AnyPayload_HelloMessagePayload);
-    rootBuilder.add_payload(helloPayloadOffset.Union());
-    auto rootMsgOffset = rootBuilder.Finish();
-
-    builder.Finish(rootMsgOffset);
-
-    uint8_t* data = builder.GetBufferPointer();
-    int size = builder.GetSize();
-
-    response->set_message(std::string(reinterpret_cast<const char*>(data), size));
-
-    reatcor->Finish(grpc::Status::OK);
-}
-
-grpc::ServerUnaryReactor* LogicGrpcServer::initialPullMessage(grpc::CallbackServerContext* context, const logic::pullMessageRequest* request, 
-    logic::pullMessageResponse* response) {
-
-    grpc::ServerUnaryReactor* reactor = context->DefaultReactor();
-
-    DoinitialPullMessage(reactor, request, response);
-
-    return reactor;
+addSessionToRedisAwaiter async_AddSessionToRedis_for_coro(sw::redis::Redis* redis, ComputeThreadPool* threadpool, 
+    int32_t userid, int64_t room_id) {
+    return addSessionToRedisAwaiter{redis, threadpool, userid, room_id};
 }
 
 grpc::ServerUnaryReactor* LogicGrpcServer::clientMessage(grpc::CallbackServerContext* context, const logic::clientMessageRequest* request, 
@@ -573,7 +493,9 @@ DetachedTask LogicGrpcServer::DojoinSession(grpc::ServerUnaryReactor* reactor, c
     SQLResult result = co_await async_query_for_coro(this->mysql_pool_, sql, SQLOperation::SQLType::QUERY);
 
     if(result.empty()) {
-        response->set_message("");
+        response->set_code(-1);
+        response->set_error_msg("Session not exist");
+        response->set_roomid(-1);
 
         reactor->Finish(grpc::Status::OK);
         co_return;
@@ -583,7 +505,52 @@ DetachedTask LogicGrpcServer::DojoinSession(grpc::ServerUnaryReactor* reactor, c
     std::string room_id = result[0][0];
     int64_t msg_id = 0;
 
-    auto messages = co_await async_PullMessage_for_coro(this->redis_pool_, this->thread_pool_, room_id, msg_id);
+    std::stringstream ss;
+    ss << "INSERT INTO room_member (room_id, user_id, role) VALUES ("
+        << room_id << ", "
+        << userid << ", "
+        << 1 << ")";
+
+    std::string status = co_await async_update_for_coro(this->mysql_pool_, ss.str(), SQLOperation::SQLType::UPDATE);
+    if(status == "-1") {
+        response->set_code(-1);
+        response->set_error_msg("already add");
+        response->set_roomid(-1);
+
+        reactor->Finish(grpc::Status::OK);
+        co_return;
+    }
+
+    int64_t room_id_ = std::stol(room_id);
+    co_await async_AddSessionToRedis_for_coro(this->redis_pool_, this->thread_pool_, userid, room_id_);
+
+    response->set_code(0);
+    response->set_error_msg("");
+    int64_t roomid = std::stol(room_id);
+    response->set_roomid(roomid);
+
+    reactor->Finish(grpc::Status::OK);
+}
+
+grpc::ServerUnaryReactor* LogicGrpcServer::pullMessage(grpc::CallbackServerContext* context, const logic::PullMessageRequest* request, 
+    logic::PullMessageResponse* response) {
+
+    grpc::ServerUnaryReactor* reactor = context->DefaultReactor();
+
+    DoPullMessage(reactor, request, response);
+
+    return reactor;
+}
+
+DetachedTask LogicGrpcServer::DoPullMessage(grpc::ServerUnaryReactor* reactor, const logic::PullMessageRequest* request, 
+    logic::PullMessageResponse* response) {
+
+    int64_t room_id = request->roomid();
+    std::string room_id_str = std::to_string(room_id);
+    int64_t message_id = request->messageid();
+    std::string room_name = request->roomname();
+
+    auto messages = co_await async_PullMessage_for_coro(this->redis_pool_, this->thread_pool_, room_id_str, message_id);
 
     thread_local flatbuffers::FlatBufferBuilder builder(4096);
     builder.Clear();
@@ -622,8 +589,8 @@ DetachedTask LogicGrpcServer::DojoinSession(grpc::ServerUnaryReactor* reactor, c
         }
     }
 
-    auto new_room_id = builder.CreateString(room_id);
-    auto new_roomname = builder.CreateString(roomname);
+    auto new_room_id = builder.CreateString(room_id_str);
+    auto new_roomname = builder.CreateString(room_name);
     auto new_messages_vector = builder.CreateVector(new_item_offsets);
 
     ChatApp::JoinSessionPayloadBuilder joinBuilder(builder);
@@ -643,7 +610,60 @@ DetachedTask LogicGrpcServer::DojoinSession(grpc::ServerUnaryReactor* reactor, c
 
     response->set_message(std::string(data, size));
 
-    this->redis_pool_->publish("room1:" + room_id, std::to_string(userid));
+    reactor->Finish(grpc::Status::OK);
+}
 
+grpc::ServerUnaryReactor* LogicGrpcServer::createSession(grpc::CallbackServerContext* context, const logic::createSessionRequest* request,
+    logic::createSessionResponse* response) {
+
+    grpc::ServerUnaryReactor* reactor = context->DefaultReactor();
+
+    DocreateSession(reactor, request, response);
+
+    return reactor;
+}
+
+DetachedTask LogicGrpcServer::DocreateSession(grpc::ServerUnaryReactor* reactor, const logic::createSessionRequest* request, 
+    logic::createSessionResponse* response) {
+
+    int32_t userid = request->userid();
+    std::string room_name = request->roomname();
+    int64_t new_room_id = SnowflakeIdWorker::getInstance().nextId();
+
+    std::stringstream ss;
+    ss << "INSERT INTO room_info (room_id, room_name, creator_id) VALUES ("
+       << new_room_id << ", '"
+       << room_name << "', "
+       << userid << ")";
+
+    std::string status = co_await async_update_for_coro(this->mysql_pool_, ss.str(), SQLOperation::SQLType::UPDATE);
+    if(status == "-1") {
+        response->set_code(-1);
+        response->set_error_msg("The room already exists");
+
+        reactor->Finish(grpc::Status::OK);
+        co_return;
+    }
+
+    std::stringstream ss2;
+    ss2 << "INSERT INTO room_member (room_id, user_id, role) VALUES ("
+        << new_room_id << ", "
+        << userid << ", "
+        << 3 << ")";
+
+    status = co_await async_update_for_coro(this->mysql_pool_, ss2.str(), SQLOperation::SQLType::UPDATE);
+    if(status == "-1") {
+        response->set_code(-2);
+        response->set_error_msg("Unknow Error");
+
+        reactor->Finish(grpc::Status::OK);
+        co_return;
+    }
+
+    co_await async_AddSessionToRedis_for_coro(this->redis_pool_, this->thread_pool_, userid, new_room_id);
+
+    response->set_code(0);
+    response->set_error_msg("");
+    response->set_roomid(new_room_id);
     reactor->Finish(grpc::Status::OK);
 }

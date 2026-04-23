@@ -29,6 +29,9 @@ public:
     Status JoinRooms(::grpc::ServerContext* context, ::grpc::ServerReader<::room::JoinRoomRequest>* reader, 
         ::room::JoinRoomResponse* response) override;
 
+    Status IsSubRoom(::grpc::ServerContext* context, const ::room::IsSubRoomRequest* request,
+        ::room::IsSubRoomResponse* response) override;
+
 private:
     sw::redis::Redis* redis_pool_;
 };

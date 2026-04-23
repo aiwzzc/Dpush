@@ -47,6 +47,19 @@ void encodeLoginJsonBody(LogicInfo& info, std::string& resp_json) {
     resp_json = root.toString();
 }
 
+void encodeCreateSessionJsonBody(int32_t userid, int64_t roomid, std::string& resp_json) {
+    JsonDoc root;
+    root.root()["userid"].set(userid);
+    root.root()["roomid"].set(std::to_string(roomid));
+    resp_json = root.toString();
+}
+
+void encodeErrorCreateSessionJsonBody(const std::string& errmsg, std::string& resp_json) {
+    JsonDoc root;
+    root.root()["errormsg"].set(errmsg);
+    resp_json = root.toString();
+}
+
 void sendResponse(const TcpConnectionPtr& conn, const HttpResponse& res) {
     std::string resJson{};
     res.appendToBuffer(resJson);
@@ -58,8 +71,8 @@ void sendResponse(const TcpConnectionPtr& conn, const HttpResponse& res) {
 HttpEventRegister::HttpEventRegister() {
     registerEvent({"/api/reg", HttpEventHandlers::register_api});
     registerEvent({"/api/login", HttpEventHandlers::login_api});
-    registerEvent({"/api/joinsession", HttpEventHandlers::joinsession_api});
-    registerEvent({"/api/newsession", HttpEventHandlers::newsession_api});
+    registerEvent({"/api/joinsession", HttpEventHandlers::joinSession_api});
+    registerEvent({"/api/createsession", HttpEventHandlers::createSession_api});
 }
 
 HttpEventRegister& HttpEventRegister::getInstance() {
@@ -86,7 +99,7 @@ void HttpEventHandlers::register_api(HttpEventContext& ctx) {
     int ret{0};
     std::string errmsg{""};
     
-    ctx.rpc_->rpcRegisterAsync(ctx.req_, ret, errmsg, [ctx] (RegisterInfo info) {
+    ctx.rpc_->rpcRegisterAsync(ctx.req_, ret, errmsg, [ctx = std::move(ctx)] (RegisterInfo info) {
         HttpResponse res{ctx.close_};
 
         if(info.errcode < 0) {
@@ -131,7 +144,7 @@ void HttpEventHandlers::login_api(HttpEventContext& ctx) {
     int ret{0};
     std::string errmsg{""};
 
-    ctx.rpc_->rpcLoginAsync(ctx.req_, ret, errmsg, [ctx] (LogicInfo info) {
+    ctx.rpc_->rpcLoginAsync(ctx.req_, ret, errmsg, [ctx = std::move(ctx)] (LogicInfo info) {
         HttpResponse res{ctx.close_};
 
         if(info.errcode < 0) {
@@ -175,7 +188,7 @@ void HttpEventHandlers::login_api(HttpEventContext& ctx) {
     }
 }
 
-void HttpEventHandlers::joinsession_api(HttpEventContext& ctx) {
+void HttpEventHandlers::joinSession_api(HttpEventContext& ctx) {
     JsonDoc root;
 
     if(!root.parse(ctx.req_.body().c_str(), ctx.req_.body().size())) {
@@ -190,11 +203,71 @@ void HttpEventHandlers::joinsession_api(HttpEventContext& ctx) {
     int userid = root.root()["userid"].asInt();
     std::string roomname = root.root()["roomname"].asString();
 
+    ctx.rpc_->rpcJoinSessionAsync(userid, roomname, [userid, ctx = std::move(ctx)] (int code, const std::string& err_msg, int64_t roomid) {
+        HttpResponse res{ctx.close_};
 
+        if(code < 0) {
+            std::string resJson;
+            res.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
+            res.setStatusMessage("Bad Request");
+            res.setCloseConnection(true);
+            encodeErrorCreateSessionJsonBody(err_msg, resJson);
+            res.setBody(resJson); // modify send err msg
+
+            sendResponse(ctx.conn_, res);
+
+        } else {
+            std::string resJson;
+            res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
+            res.setStatusMessage("OK");
+            res.setCloseConnection(true);
+            encodeCreateSessionJsonBody(userid, roomid, resJson);
+            res.setBody(resJson);
+
+            sendResponse(ctx.conn_, res);
+        }
+    });
 }
 
-void HttpEventHandlers::newsession_api(HttpEventContext& ctx) {
+void HttpEventHandlers::createSession_api(HttpEventContext& ctx) {
+    JsonDoc root;
 
+    if(!root.parse(ctx.req_.body().c_str(), ctx.req_.body().size())) {
+
+    }
+
+    if(!root.root().isMember("userid") || !root.root()["userid"].isInt() ||
+       !root.root().isMember("roomname") || !root.root()["roomname"].isString()) {
+
+    }
+
+    int userid = root.root()["userid"].asInt();
+    std::string roomname = root.root()["roomname"].asString();
+
+    ctx.rpc_->rpcCreateSessionAsync(userid, roomname, [userid, ctx = std::move(ctx)] (int32_t code, const std::string& errmsg, int64_t roomid) {
+        HttpResponse res{ctx.close_};
+
+        if(code < 0) {
+            std::string resJson;
+            res.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
+            res.setStatusMessage("Bad Request");
+            res.setCloseConnection(true);
+            encodeErrorCreateSessionJsonBody(errmsg, resJson);
+            res.setBody(resJson);
+
+            sendResponse(ctx.conn_, res);
+
+        } else {
+            std::string resJson;
+            res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
+            res.setStatusMessage("OK");
+            res.setCloseConnection(true);
+            encodeCreateSessionJsonBody(userid, roomid, resJson);
+            res.setBody(resJson);
+
+            sendResponse(ctx.conn_, res);
+        }
+    });
 }
 
 void HttpEventHandlers::handleHttpEvent(const TcpConnectionPtr& conn, const HttpRequest& req, 
@@ -209,14 +282,6 @@ void HttpEventHandlers::handleHttpEvent(const TcpConnectionPtr& conn, const Http
     bool close = connection == "close" || (req.version() == HttpRequest::Version::kHttp10 && connection != "keep-alive");
 
     HttpResponse res{close};
-
-    auto sendResponse = [] (const TcpConnectionPtr& conn, const HttpResponse& res) {
-        std::string resJson{};
-        res.appendToBuffer(resJson);
-        conn->send(resJson);
-
-        if(res.closeConnection()) conn->shutdown();
-    };
 
     HttpEventContext ctx{conn, client, req, close, res};
 

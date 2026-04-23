@@ -8,7 +8,9 @@ import {
   PullMissingMessagePayload,
   RequestRoomHistoryPayload,
   BatchPullMessagePayload,
-  BatchPullMessageItem
+  BatchPullMessageItem,
+  SignalingFromClientPayload,
+  SignalingFromClientJoinPayload
 } from '../generated/chat_app';
 
 export function encodeClientMessage(roomId: string, clientMessageId: string, content: string, msgType: 'text' | 'image' = 'text', imageUrl?: string): Uint8Array {
@@ -105,6 +107,48 @@ export function encodeBatchPullMessage(roomMaxIds: { roomId: string, maxId: numb
 
   RootMessage.startRootMessage(builder);
   RootMessage.addPayloadType(builder, AnyPayload.BatchPullMessagePayload);
+  RootMessage.addPayload(builder, payloadOffset);
+  const rootOffset = RootMessage.endRootMessage(builder);
+
+  builder.finish(rootOffset);
+  return builder.asUint8Array();
+}
+
+export function encodeSignalingFromClient(action: string, roomId: string): Uint8Array {
+  const builder = new flatbuffers.Builder(1024);
+
+  const actionOffset = builder.createString(action);
+  const roomIdOffset = builder.createString(roomId);
+
+  SignalingFromClientPayload.startSignalingFromClientPayload(builder);
+  SignalingFromClientPayload.addAction(builder, actionOffset);
+  SignalingFromClientPayload.addRoomId(builder, roomIdOffset);
+  const payloadOffset = SignalingFromClientPayload.endSignalingFromClientPayload(builder);
+
+  RootMessage.startRootMessage(builder);
+  RootMessage.addPayloadType(builder, AnyPayload.SignalingFromClientPayload);
+  RootMessage.addPayload(builder, payloadOffset);
+  const rootOffset = RootMessage.endRootMessage(builder);
+
+  builder.finish(rootOffset);
+  return builder.asUint8Array();
+}
+
+export function encodeSignalingFromClientJoin(action: string, roomId: string, roomName: string): Uint8Array {
+  const builder = new flatbuffers.Builder(1024);
+
+  const actionOffset = builder.createString(action);
+  const roomIdOffset = builder.createString(roomId);
+  const roomNameOffset = builder.createString(roomName);
+
+  SignalingFromClientJoinPayload.startSignalingFromClientJoinPayload(builder);
+  SignalingFromClientJoinPayload.addAction(builder, actionOffset);
+  SignalingFromClientJoinPayload.addRoomId(builder, roomIdOffset);
+  SignalingFromClientJoinPayload.addRoomName(builder, roomNameOffset);
+  const payloadOffset = SignalingFromClientJoinPayload.endSignalingFromClientJoinPayload(builder);
+
+  RootMessage.startRootMessage(builder);
+  RootMessage.addPayloadType(builder, AnyPayload.SignalingFromClientJoinPayload);
   RootMessage.addPayload(builder, payloadOffset);
   const rootOffset = RootMessage.endRootMessage(builder);
 

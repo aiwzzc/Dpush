@@ -1,7 +1,7 @@
 import * as flatbuffers from 'flatbuffers';
 
 export enum MsgContentType { Unknown = 0, Text = 1, Image = 2, Audio = 3 }
-export enum AnyPayload { NONE = 0, ClientMessagePayload = 2, ServerMessagePayload = 3, RequestRoomHistoryPayload = 4, RequestMessagePayload = 5, PullMissingMessagePayload = 6, MessageAckPayload = 7, BatchPullMessagePayload = 8, JoinSessionPayload = 9 }
+export enum AnyPayload { NONE = 0, HelloMessagePayload = 1, ClientMessagePayload = 2, ServerMessagePayload = 3, RequestRoomHistoryPayload = 4, RequestMessagePayload = 5, PullMissingMessagePayload = 6, MessageAckPayload = 7, BatchPullMessagePayload = 8, JoinSessionPayload = 9, SignalingFromClientPayload = 10, SignalingFromServerPayload = 11, SignalingFromClientJoinPayload = 12 }
 
 export class BatchPullMessageItem {
   bb: flatbuffers.ByteBuffer | null = null;
@@ -479,5 +479,107 @@ export class RootMessage {
   }
   static finishRootMessageBuffer(builder: flatbuffers.Builder, offset: number) {
     builder.finish(offset);
+  }
+}
+
+export class SignalingFromClientPayload {
+  bb: flatbuffers.ByteBuffer | null = null;
+  bb_pos = 0;
+  __init(i: number, bb: flatbuffers.ByteBuffer): SignalingFromClientPayload {
+    this.bb_pos = i;
+    this.bb = bb;
+    return this;
+  }
+  action(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+  roomId(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 6);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+  static startSignalingFromClientPayload(builder: flatbuffers.Builder) {
+    builder.startObject(2);
+  }
+  static addAction(builder: flatbuffers.Builder, actionOffset: number) {
+    builder.addFieldOffset(0, actionOffset, 0);
+  }
+  static addRoomId(builder: flatbuffers.Builder, roomIdOffset: number) {
+    builder.addFieldOffset(1, roomIdOffset, 0);
+  }
+  static endSignalingFromClientPayload(builder: flatbuffers.Builder): number {
+    return builder.endObject();
+  }
+  static createSignalingFromClientPayload(builder: flatbuffers.Builder, actionOffset: number, roomIdOffset: number): number {
+    SignalingFromClientPayload.startSignalingFromClientPayload(builder);
+    SignalingFromClientPayload.addAction(builder, actionOffset);
+    SignalingFromClientPayload.addRoomId(builder, roomIdOffset);
+    return SignalingFromClientPayload.endSignalingFromClientPayload(builder);
+  }
+}
+
+export class SignalingFromServerPayload {
+  bb: flatbuffers.ByteBuffer | null = null;
+  bb_pos = 0;
+  __init(i: number, bb: flatbuffers.ByteBuffer): SignalingFromServerPayload {
+    this.bb_pos = i;
+    this.bb = bb;
+    return this;
+  }
+  action(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+  roomId(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 6);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+  status(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 8);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+}
+
+export class SignalingFromClientJoinPayload {
+  bb: flatbuffers.ByteBuffer | null = null;
+  bb_pos = 0;
+  __init(i: number, bb: flatbuffers.ByteBuffer): SignalingFromClientJoinPayload {
+    this.bb_pos = i;
+    this.bb = bb;
+    return this;
+  }
+  action(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+  roomId(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 6);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+  roomName(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 8);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+  static startSignalingFromClientJoinPayload(builder: flatbuffers.Builder) {
+    builder.startObject(3);
+  }
+  static addAction(builder: flatbuffers.Builder, actionOffset: number) {
+    builder.addFieldOffset(0, actionOffset, 0);
+  }
+  static addRoomId(builder: flatbuffers.Builder, roomIdOffset: number) {
+    builder.addFieldOffset(1, roomIdOffset, 0);
+  }
+  static addRoomName(builder: flatbuffers.Builder, roomNameOffset: number) {
+    builder.addFieldOffset(2, roomNameOffset, 0);
+  }
+  static endSignalingFromClientJoinPayload(builder: flatbuffers.Builder): number {
+    return builder.endObject();
+  }
+  static createSignalingFromClientJoinPayload(builder: flatbuffers.Builder, actionOffset: number, roomIdOffset: number, roomNameOffset: number): number {
+    SignalingFromClientJoinPayload.startSignalingFromClientJoinPayload(builder);
+    SignalingFromClientJoinPayload.addAction(builder, actionOffset);
+    SignalingFromClientJoinPayload.addRoomId(builder, roomIdOffset);
+    SignalingFromClientJoinPayload.addRoomName(builder, roomNameOffset);
+    return SignalingFromClientJoinPayload.endSignalingFromClientJoinPayload(builder);
   }
 }

@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <unordered_map>
+#include <optional>
 #include <sw/redis++/redis++.h>
 
 class HttpRequest;
@@ -29,9 +30,8 @@ WebSocketFrame parseWebSocketFrame(const std::string& data);
 class WebsocketConn : public std::enable_shared_from_this<WebsocketConn> {
 
 public:
-    int room_index_ = -1;
-
     using WebconnCloseCallback = std::function<void()>;
+    using WebsocketConnPtr = std::shared_ptr<WebsocketConn>;
 
     WebsocketConn(const TcpConnectionPtr&);
     ~WebsocketConn();
@@ -41,13 +41,12 @@ public:
     void setUserid(int32_t userid);
     void setUsername(const std::string&);
     void setWebconnCloseCallback(const WebconnCloseCallback& cb);
-    void setjoinedRooms(const std::vector<std::string>& rooms);
+    void setjoinedRooms(const std::unordered_map<std::string, int>& rooms);
 
     void send(const std::string&);
     void send(const char*, std::size_t);
     void sendPongFrame();
     void sendCloseFrame(uint16_t code, const std::string reason);
-    void addRoom(const std::string& roomid);
 
     bool connected();
     void disconnect();
@@ -56,7 +55,12 @@ public:
     std::string& username();
     int32_t userid() const;
     TcpConnectionPtr conn() const;
-    std::vector<std::string> getjoinedRooms() const;
+    void setRoomIndex(const std::string& room_id, int new_index);
+    void joinRoom(const std::string& room_id, int new_index);
+    std::optional<int> getRoom_index(const std::string& room_id) const;
+    const std::unordered_map<std::string, int>& getjoinedRooms() const;
+
+    static void SubscribeSession(const WebsocketConnPtr& conn, const std::string& roomid);
 
 private:
     bool isCloseFrame();
@@ -66,7 +70,8 @@ private:
     std::string username_;
     WebconnCloseCallback webconnCloseCallback_;
 
-    std::vector<std::string> joinedRooms_;
+    // std::vector<std::string> joinedRooms_;
+    std::unordered_map<std::string, int> joinedRooms_;
 };
 
 using WebsocketConnPtr = std::shared_ptr<WebsocketConn>;

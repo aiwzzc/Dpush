@@ -7,6 +7,7 @@ int main() {
     sw::redis::ConnectionOptions connection_options;
     connection_options.host = "127.0.0.1";
     connection_options.port = 6379;
+    connection_options.db = 1;
 
     sw::redis::ConnectionPoolOptions pool_options;
     pool_options.size = 2;

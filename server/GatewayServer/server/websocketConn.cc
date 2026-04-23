@@ -19,7 +19,7 @@ void WebsocketConn::setUserid(int32_t userid)
 void WebsocketConn::setUsername(const std::string& username) 
 { this->username_.assign(username); }
 
-void WebsocketConn::setjoinedRooms(const std::vector<std::string>& rooms)
+void WebsocketConn::setjoinedRooms(const std::unordered_map<std::string, int>& rooms)
 { this->joinedRooms_ = std::move(rooms); }
 
 std::string& WebsocketConn::username() 
@@ -34,14 +34,37 @@ EventLoop* WebsocketConn::getLoop() const
 void WebsocketConn::setWebconnCloseCallback(const WebconnCloseCallback& cb) 
 { this->webconnCloseCallback_ = std::move(cb); }
 
-void WebsocketConn::addRoom(const std::string& roomid) {
-    auto it = std::find(this->joinedRooms_.begin(), this->joinedRooms_.end(), roomid);
-    if(it == this->joinedRooms_.end()) {
-        this->joinedRooms_.push_back(roomid);
-    }
+void WebsocketConn::setRoomIndex(const std::string& room_id, int new_index) {
+    auto it = this->joinedRooms_.find(room_id);
+    if(it == this->joinedRooms_.end()) return;
+
+    this->joinedRooms_[room_id] = new_index;
 }
 
-std::vector<std::string> WebsocketConn::getjoinedRooms() const
+void WebsocketConn::joinRoom(const std::string& room_id, int new_index) {
+    auto it = this->joinedRooms_.find(room_id);
+    if(it != this->joinedRooms_.end()) return;
+
+    this->joinedRooms_[room_id] = new_index;
+}
+
+std::optional<int> WebsocketConn::getRoom_index(const std::string& room_id) const {
+    auto it = this->joinedRooms_.find(room_id);
+    if(it == this->joinedRooms_.end()) return std::nullopt;
+
+    return it->second;
+}
+
+void WebsocketConn::SubscribeSession(const WebsocketConnPtr& wsContextPtr, const std::string& room_id) {
+    auto& conns = LocalWebsockConnRoomhash[room_id];
+    bool needSubscribeToRedisPub = conns.empty() ? true : false;
+
+    wsContextPtr->joinRoom(room_id, conns.size());
+    conns.push_back(wsContextPtr);
+    if(needSubscribeToRedisPub) GatewayPubSubManager::SubscribeRoomSafe(room_id);
+}
+
+const std::unordered_map<std::string, int>& WebsocketConn::getjoinedRooms() const
 { return this->joinedRooms_; }
 
 void WebsocketConn::sendCloseFrame(uint16_t code, const std::string reason) {
@@ -167,6 +190,10 @@ std::vector<std::string> WebsocketConn::onRead(const TcpConnectionPtr& conn, mud
 
         flatbuffers::Verifier verifier((const uint8_t*)payload_data.c_str(), payload_data.size());
         if (!ChatApp::VerifyRootMessageBuffer(verifier)) continue;
+        // if (!ChatApp::VerifyRootMessageBuffer(verifier)) {
+        //     std::cout << "[ERROR] Flatbuffer Verifier failed! payload_length=" << payload_length << std::endl;
+        //     continue; 
+        // }
 
         messageList.emplace_back(std::move(payload_data));
 

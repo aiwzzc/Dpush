@@ -107,16 +107,36 @@ table JoinSessionPayload {
     messages: [ServerMessageItem]; 
 }
 
+table SignalingFromClientPayload {
+    action: string;
+    room_id: string;
+}
+
+table SignalingFromServerPayload {
+    action: string;
+    room_id: string;
+    status: string;
+}
+
+table SignalingFromClientJoinPayload {
+    action: string;
+    room_id: string;
+    room_name: string;
+}
+
 union AnyPayload {
     HelloMessagePayload,
-    BatchPullMessagePayload,
-    JoinSessionPayload,
     ClientMessagePayload, 
     ServerMessagePayload, 
     RequestRoomHistoryPayload, 
     RequestMessagePayload, 
     PullMissingMessagePayload, 
-    MessageAckPayload 
+    MessageAckPayload,
+    BatchPullMessagePayload,
+    JoinSessionPayload,
+    SignalingFromClientPayload,
+    SignalingFromServerPayload,
+    SignalingFromClientJoinPayload
 } 
 
 table RootMessage { 

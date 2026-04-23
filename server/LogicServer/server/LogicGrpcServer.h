@@ -32,9 +32,6 @@ public:
     LogicGrpcServer(MySQLConnPool*, sw::redis::Redis*, ComputeThreadPool*);
     ~LogicGrpcServer();
 
-    grpc::ServerUnaryReactor* initialPullMessage(grpc::CallbackServerContext* context, const logic::pullMessageRequest* request, 
-        logic::pullMessageResponse* response) override;
-
     grpc::ServerUnaryReactor* clientMessage(grpc::CallbackServerContext* context, const logic::clientMessageRequest* request, 
         logic::clientMessageResponse* response) override;
 
@@ -47,10 +44,13 @@ public:
     grpc::ServerUnaryReactor* joinSession(grpc::CallbackServerContext* context, const logic::joinSessionRequest* request, 
         logic::joinSessionResponse* response) override;
 
-private:
-    DetachedTask DoinitialPullMessage(grpc::ServerUnaryReactor*, const logic::pullMessageRequest*, 
-        logic::pullMessageResponse*);
+    grpc::ServerUnaryReactor* createSession(grpc::CallbackServerContext* context, const logic::createSessionRequest* request,
+        logic::createSessionResponse* response) override;
 
+    grpc::ServerUnaryReactor* pullMessage(grpc::CallbackServerContext* context, const logic::PullMessageRequest* request, 
+        logic::PullMessageResponse* response) override;
+
+private:
     DetachedTask DoclientMessage(grpc::ServerUnaryReactor*, const logic::clientMessageRequest*, 
         logic::clientMessageResponse*);
 
@@ -59,6 +59,12 @@ private:
 
     DetachedTask DojoinSession(grpc::ServerUnaryReactor*, const logic::joinSessionRequest*, 
         logic::joinSessionResponse*);
+
+    DetachedTask DocreateSession(grpc::ServerUnaryReactor*, const logic::createSessionRequest*, 
+        logic::createSessionResponse*);
+
+    DetachedTask DoPullMessage(grpc::ServerUnaryReactor*, const logic::PullMessageRequest*, 
+        logic::PullMessageResponse*);
 
     MySQLConnPool* mysql_pool_;
     sw::redis::Redis* redis_pool_;

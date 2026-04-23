@@ -2,21 +2,11 @@ syntax = "proto3";
 
 package logic;
 
-message pullMessageRequest {
-    int32 userid = 1;
-    string username = 2;
-    int32 messageCount = 3;
-}
-
 message bathPullMessageRequest {
     bytes message = 3;
 }
 
 message bathPullMessageResponse {
-    bytes message = 1;
-}
-
-message pullMessageResponse {
     bytes message = 1;
 }
 
@@ -45,13 +35,37 @@ message joinSessionRequest {
 }
 
 message joinSessionResponse {
+    int64 roomid = 1;
+    int32 code = 2;
+    string error_msg = 3;
+}
+
+message createSessionRequest {
+    int32 userid = 1;
+    string roomname = 2;
+}
+
+message createSessionResponse {
+    int64 roomid = 1;
+    int32 code = 2;
+    string error_msg = 3;
+}
+
+message PullMessageRequest {
+    int64 roomid = 1;
+    string roomname = 2;
+    int64 messageid = 3;
+}
+
+message PullMessageResponse {
     bytes message = 1;
 }
 
 service LogicServer {
-    rpc initialPullMessage (pullMessageRequest) returns (pullMessageResponse);
     rpc bathPullMessage (bathPullMessageRequest) returns (stream bathPullMessageResponse);
     rpc clientMessage (clientMessageRequest) returns (clientMessageResponse);
     rpc clearCursors (clearCursorsRequest) returns (clearCursorsResponse);
     rpc joinSession (joinSessionRequest) returns (joinSessionResponse);
+    rpc createSession (createSessionRequest) returns (createSessionResponse);
+    rpc pullMessage (PullMessageRequest) returns (PullMessageResponse);
 }

@@ -92,29 +92,6 @@ static uint64_t getCurrentTimestamp() {
     return milliseconds.count(); //单位是毫秒
 }
 
-std::string SerializeMessageToFlatBuffer(const Message& msg) {
-    thread_local flatbuffers::FlatBufferBuilder builder(512);
-
-    auto content = builder.CreateString(msg.content);
-    auto username = builder.CreateString(msg.username);
-
-    ChatApp::StreamMessagePayloadBuilder StreamMsgBulder(builder);
-    StreamMsgBulder.add_content(content);
-    StreamMsgBulder.add_timestamp(msg.timestamp);
-    StreamMsgBulder.add_userid(msg.user_id);
-    StreamMsgBulder.add_username(username);
-    auto StreamMsgOffset = StreamMsgBulder.Finish();
-
-    ChatApp::RootMessageBuilder rootMsgBuilder(builder);
-    rootMsgBuilder.add_payload_type(ChatApp::AnyPayload_StreamMessagePayload);
-    rootMsgBuilder.add_payload(StreamMsgOffset.Union());
-    auto rootMsgOffset = rootMsgBuilder.Finish();
-
-    builder.Finish(rootMsgOffset);
-
-    return std::string(reinterpret_cast<const char*>(builder.GetBufferPointer()), builder.GetSize());
-}
-
 void KafkaConsumer::stop() { this->running_.store(false); }
 
 void KafkaConsumer::process_message(RdKafka::Message* message) {
@@ -218,7 +195,7 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
 
         pipe.xadd("{" + roomid + "}", stream_id, stream_fields.begin(), stream_fields.end(), 500);
 
-        pipe.publish("room0:" + roomid, fb_binary);
+        pipe.publish("room:" + roomid, fb_binary);
 
         pipe.exec();
 

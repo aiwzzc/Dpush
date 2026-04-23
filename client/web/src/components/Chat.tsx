@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { User, Message, Room } from '../types';
-import { Send, Image as ImageIcon, LogOut, Sparkles, Loader2, Hash, Plus, X, Users, MessageSquare, AlertCircle, RefreshCw } from 'lucide-react';
+import { Send, Image as ImageIcon, LogOut, Sparkles, Loader2, Hash, Plus, X, Users, MessageSquare, AlertCircle, RefreshCw, Search } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import * as flatbuffers from 'flatbuffers';
 import localforage from 'localforage';
-import { RootMessage, AnyPayload, ServerMessagePayload, RequestMessagePayload, MessageAckPayload, MsgContentType } from '../generated/chat_app';
-import { encodeClientMessage, encodePullMissingMessages, encodeRequestRoomHistory, encodeBatchPullMessage } from '../utils/fb-helper';
+import { RootMessage, AnyPayload, ServerMessagePayload, RequestMessagePayload, MessageAckPayload, MsgContentType, SignalingFromServerPayload } from '../generated/chat_app';
+import { encodeClientMessage, encodePullMissingMessages, encodeRequestRoomHistory, encodeBatchPullMessage, encodeSignalingFromClient, encodeSignalingFromClientJoin } from '../utils/fb-helper';
 import { JoinSessionPayload } from '../generated/chat_app';
 
 // 智能解析时间戳（兼容秒级和毫秒级）
@@ -46,6 +46,11 @@ export function Chat({ user, onLogout }: ChatProps) {
   const [joinRoomQuery, setJoinRoomQuery] = useState('');
   const [isJoiningRoom, setIsJoiningRoom] = useState(false);
   const [joinRoomError, setJoinRoomError] = useState('');
+  const [isCreatingRoom, setIsCreatingRoom] = useState(false);
+  const [createRoomError, setCreateRoomError] = useState('');
+  
+  const pendingCreateRoomNameRef = useRef<string | null>(null);
+  const pendingCreateRoomDescRef = useRef<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageContainerRef = useRef<HTMLDivElement>(null);
@@ -404,27 +409,92 @@ export function Chat({ user, onLogout }: ChatProps) {
                 });
               }
             }
+          } else if (payloadType === AnyPayload.SignalingFromServerPayload) {
+            const payload = root.payload(new SignalingFromServerPayload()) as SignalingFromServerPayload;
+            const action = payload.action();
+            const roomId = payload.roomId();
+            const status = payload.status();
+
+            if (action === 'subscribe_ack' && status === 'ok' && roomId) {
+              const newRoom = {
+                id: roomId,
+                name: pendingCreateRoomNameRef.current || 'New Room',
+                description: pendingCreateRoomDescRef.current || ''
+              };
+
+              setRooms(prev => {
+                if (prev.some(r => r.id === newRoom.id)) return prev;
+                return [...prev, newRoom];
+              });
+              
+              setCurrentRoom(newRoom);
+              setNewRoomName('');
+              setNewRoomDesc('');
+              setShowCreateRoom(false);
+              setIsCreatingRoom(false);
+              setCreateRoomError('');
+            }
+          } else if (payloadType === AnyPayload.JoinSessionPayload) {
+            const joinPayload = root.payload(new JoinSessionPayload()) as JoinSessionPayload;
+            const roomId = joinPayload.roomId() || '';
+            const roomName = joinPayload.roomname() || '';
+            const messagesLen = joinPayload.messagesLength();
+
+            const newMsgs: Message[] = [];
+            for (let i = 0; i < messagesLen; i++) {
+               const msg = joinPayload.messages(i);
+               if (msg) {
+                  newMsgs.push({
+                    id: msg.serverMessageId().toString(), // Using serverMessageId as fallback id
+                    clientMessageId: msg.clientMessageId() || undefined,
+                    serverMessageId: Number(msg.serverMessageId()),
+                    sender: msg.user()?.username() || 'Unknown',
+                    content: msg.content() || '',
+                    timestamp: parseTimestamp(Number(msg.timestamp())),
+                    type: msg.msgType() === MsgContentType.Image ? 'image' : 'text',
+                    imageUrl: msg.imageUrl() || undefined
+                  });
+               }
+            }
+
+            const newRoom: Room = {
+              id: roomId,
+              name: roomName,
+              description: ''
+            };
+
+            setRooms(prev => {
+              if (!prev.find(r => r.id === newRoom.id)) {
+                return [...prev, newRoom];
+              }
+              return prev;
+            });
+
+            setMessages(prev => {
+              const existingMsgs = prev[roomId] || [];
+              const existingIds = new Set(existingMsgs.map(m => m.id));
+              const filtered = newMsgs.filter(m => !existingIds.has(m.id));
+              const merged = [...existingMsgs, ...filtered].sort((a,b) => a.timestamp.getTime() - b.timestamp.getTime());
+              
+              let maxId = roomMaxServerMsgIdRef.current[roomId] || 0;
+              merged.forEach(m => {
+                if (m.serverMessageId !== undefined && m.serverMessageId > maxId) {
+                  maxId = m.serverMessageId;
+                }
+              });
+              roomMaxServerMsgIdRef.current[roomId] = maxId;
+
+              return { ...prev, [roomId]: merged };
+            });
+
+            setJoinRoomQuery('');
+            setCurrentRoom(newRoom);
+            setIsJoiningRoom(false);
+            setJoinRoomError('');
           }
           return;
         }
 
-        // 处理 JSON 消息 (如 serverCreateRoom 等不在 Schema 中的消息)
-        const data = JSON.parse(event.data);
-        
-        // 处理服务器广播的新建房间消息
-        if (data.type === 'serverCreateRoom' && data.payload) {
-          const newRoom: Room = {
-            id: data.payload.roomId,
-            name: data.payload.roomName,
-            description: '' // 后端目前没有 description 字段
-          };
-          
-          setRooms(prev => {
-            // 避免重复添加
-            if (prev.some(r => r.id === newRoom.id)) return prev;
-            return [...prev, newRoom];
-          });
-        }
       } catch (e) {
         console.error('Failed to parse message', e);
       }
@@ -537,108 +607,65 @@ export function Chat({ user, onLogout }: ChatProps) {
     setIsJoiningRoom(true);
     setJoinRoomError('');
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
-
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
       const response = await fetch('/api/joinsession', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userid: currentUser.userid, roomname: joinRoomQuery.trim() }),
         signal: controller.signal
       });
+
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error('Failed to join room');
+        throw new Error('Failed to join room via HTTP');
       }
 
-      const arrayBuffer = await response.arrayBuffer();
-      if (arrayBuffer.byteLength === 0) {
-        setJoinRoomError('没有找到该房间');
+      const data = await response.json();
+      if (data.errormsg) {
+        setJoinRoomError(data.errormsg);
+        setIsJoiningRoom(false);
         return;
       }
 
-      const buf = new flatbuffers.ByteBuffer(new Uint8Array(arrayBuffer));
-      let joinPayload: JoinSessionPayload | null = null;
-      
-      try {
-        joinPayload = JoinSessionPayload.getRootAsJoinSessionPayload(buf);
-      } catch (e) {
-        try {
-          const rootMessage = RootMessage.getRootAsRootMessage(buf);
-          if (rootMessage.payloadType() === AnyPayload.JoinSessionPayload) {
-            joinPayload = rootMessage.payload(new JoinSessionPayload()) as JoinSessionPayload;
-          }
-        } catch (err) {}
+      const { roomid } = data;
+      if (!roomid) {
+        setJoinRoomError('服务器未返回 roomid');
+        setIsJoiningRoom(false);
+        return;
       }
 
-      if (!joinPayload) {
-         setJoinRoomError('房间数据解析失败');
-         return;
+      // Send SignalingFromClientJoinPayload using FlatBuffers over WebSocket
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        // encodeSignalingFromClientJoin is imported from fb-helper
+        const buf = encodeSignalingFromClientJoin("join_room", roomid.toString(), joinRoomQuery.trim());
+        ws.send(buf);
+
+        // 设置 WebSocket 确认超时
+        setTimeout(() => {
+          setIsJoiningRoom(prev => {
+            if (prev) {
+              setJoinRoomError('WebSocket 发送成功，但等待后端 JoinSession 返回数据超时(10秒)');
+              return false;
+            }
+            return prev;
+          });
+        }, 10000);
+
+      } else {
+        setJoinRoomError('WebSocket 未连接，无法发送订阅信令');
+        setIsJoiningRoom(false);
       }
-
-      const roomId = joinPayload.roomId() || '';
-      const roomName = joinPayload.roomname() || '';
-      const messagesLen = joinPayload.messagesLength();
-
-      const newMsgs: Message[] = [];
-      for (let i = 0; i < messagesLen; i++) {
-         const msg = joinPayload.messages(i);
-         if (msg) {
-            newMsgs.push({
-              id: msg.serverMessageId().toString(), // Using serverMessageId as fallback id
-              clientMessageId: msg.clientMessageId() || undefined,
-              serverMessageId: Number(msg.serverMessageId()),
-              sender: msg.user()?.username() || 'Unknown',
-              content: msg.content() || '',
-              timestamp: parseTimestamp(Number(msg.timestamp())),
-              type: msg.msgType() === MsgContentType.Image ? 'image' : 'text',
-              imageUrl: msg.imageUrl() || undefined
-            });
-         }
-      }
-
-      const newRoom: Room = {
-        id: roomId,
-        name: roomName,
-        description: ''
-      };
-
-      setRooms(prev => {
-        if (!prev.find(r => r.id === newRoom.id)) {
-          return [...prev, newRoom];
-        }
-        return prev;
-      });
-
-      setMessages(prev => {
-        const existingMsgs = prev[roomId] || [];
-        const existingIds = new Set(existingMsgs.map(m => m.id));
-        const filtered = newMsgs.filter(m => !existingIds.has(m.id));
-        const merged = [...existingMsgs, ...filtered].sort((a,b) => a.timestamp.getTime() - b.timestamp.getTime());
-        
-        let maxId = roomMaxServerMsgIdRef.current[roomId] || 0;
-        merged.forEach(m => {
-          if (m.serverMessageId !== undefined && m.serverMessageId > maxId) {
-            maxId = m.serverMessageId;
-          }
-        });
-        roomMaxServerMsgIdRef.current[roomId] = maxId;
-
-        return { ...prev, [roomId]: merged };
-      });
-
-      setJoinRoomQuery('');
-      setCurrentRoom(newRoom);
 
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        setJoinRoomError('服务器响应超时，请重试');
+        setJoinRoomError('HTTP 接口 /api/joinsession 响应超时');
       } else {
-        setJoinRoomError('加入房间时发生错误');
+        setJoinRoomError(err.message || '加入房间发生未知错误');
       }
-    } finally {
       setIsJoiningRoom(false);
     }
   };
@@ -739,30 +766,76 @@ export function Chat({ user, onLogout }: ChatProps) {
     }
   };
 
-  const handleCreateRoom = (e: React.FormEvent) => {
+  const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newRoomName.trim()) return;
+    if (!newRoomName.trim() || !currentUser.userid) return;
 
-    // 构造发给后端的创建房间请求
-    const createRoomReq = {
-      type: 'clientCreateRoom',
-      payload: {
-        roomName: newRoomName.trim()
+    setIsCreatingRoom(true);
+    setCreateRoomError('');
+    pendingCreateRoomNameRef.current = newRoomName.trim();
+    pendingCreateRoomDescRef.current = newRoomDesc.trim();
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const response = await fetch('/api/createsession', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userid: currentUser.userid, roomname: newRoomName.trim() }),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error('Failed to create room via HTTP');
       }
-    };
 
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(createRoomReq));
-    } else {
-      console.warn('WebSocket is not connected. Room creation request not sent.');
+      const data = await response.json();
+      if (data.errormsg) {
+        setCreateRoomError(data.errormsg);
+        setIsCreatingRoom(false);
+        return;
+      }
+
+      const { roomid } = data;
+      if (!roomid) {
+        setCreateRoomError('服务器未返回 roomid');
+        setIsCreatingRoom(false);
+        return;
+      }
+
+      // Send SignalingFromClientPayload using FlatBuffers over WebSocket
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        const buf = encodeSignalingFromClient("subscribe_room", roomid.toString());
+        ws.send(buf);
+
+        // 设置 WebSocket 确认超时
+        setTimeout(() => {
+          setIsCreatingRoom(prev => {
+            if (prev) {
+              setCreateRoomError('WebSocket 发送成功，但等待后端 subscribe_ack 回复超时(10秒)');
+              return false;
+            }
+            return prev;
+          });
+        }, 10000);
+
+      } else {
+        setCreateRoomError('WebSocket 未连接，无法发送订阅信令');
+        setIsCreatingRoom(false);
+      }
+
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        setCreateRoomError('HTTP 接口 /api/createsession 响应超时');
+      } else {
+        setCreateRoomError(err.message || '创建房间发生未知错误');
+      }
+      setIsCreatingRoom(false);
     }
-
-    // 乐观更新 UI：我们先不在这里更新房间列表，而是等待后端广播 serverCreateRoom
-    // 这样可以确保房间 ID 是后端生成的真实 ID
-    
-    setNewRoomName('');
-    setNewRoomDesc('');
-    setShowCreateRoom(false);
+    // We do NOT clear input or close modal here. Wait for subscribe_ack!
   };
 
   const handleGenerateImage = async () => {
@@ -934,33 +1007,40 @@ export function Chat({ user, onLogout }: ChatProps) {
 
         {/* Room List */}
         <div className="flex-1 overflow-y-auto py-4">
-          <div className="px-4 mb-4">
-             <form onSubmit={handleJoinRoom} className="relative group">
+          <div className="px-4 mb-4 flex gap-2">
+             <form onSubmit={handleJoinRoom} className="relative flex-1">
                 <input
                    type="text"
                    value={joinRoomQuery}
                    onChange={e => setJoinRoomQuery(e.target.value)}
                    disabled={isJoiningRoom}
-                   placeholder="Search & Join Room..."
-                   className="w-full bg-zinc-900 border border-zinc-800 text-sm rounded-md py-2 px-3 text-zinc-300 placeholder-zinc-500 focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600 transition-all"
+                   placeholder="Search room..."
+                   className="w-full bg-zinc-900 border border-zinc-800 text-sm rounded-md py-2 px-3 pr-8 text-zinc-300 placeholder-zinc-500 focus:outline-none focus:border-zinc-600 focus:ring-1 focus:ring-zinc-600 transition-all"
                 />
                 {isJoiningRoom ? (
-                  <div className="absolute right-3 top-2.5">
+                  <div className="absolute right-2 top-2.5">
                     <Loader2 className="w-4 h-4 animate-spin text-zinc-500" />
                   </div>
                 ) : (
-                  <button type="submit" className="absolute right-3 top-2.5 text-zinc-500 hover:text-white transition-colors" disabled={!joinRoomQuery.trim()}>
-                    <Plus className="w-4 h-4" />
+                  <button type="submit" className="absolute right-2 top-2.5 text-zinc-500 hover:text-white transition-colors" disabled={!joinRoomQuery.trim()}>
+                    <Search className="w-4 h-4" />
                   </button>
                 )}
              </form>
-             {joinRoomError && (
-                <div className="mt-2 text-xs text-red-500 px-1 flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" />
-                  {joinRoomError}
-                </div>
-             )}
+             <button 
+                onClick={() => setShowCreateRoom(true)}
+                className="w-9 h-9 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-md flex items-center justify-center transition-colors text-zinc-300 hover:text-white shrink-0"
+                title="Create Room"
+             >
+                <Plus size={16} />
+             </button>
           </div>
+          {joinRoomError && (
+             <div className="px-4 mb-3 text-xs text-red-500 flex items-center gap-1">
+               <AlertCircle className="w-3 h-3" />
+               {joinRoomError}
+             </div>
+          )}
           <div className="space-y-0.5 px-2">
             {rooms.map(room => (
               <button
@@ -1205,9 +1285,10 @@ export function Chat({ user, onLogout }: ChatProps) {
                 <input
                   type="text"
                   required
+                  disabled={isCreatingRoom}
                   value={newRoomName}
                   onChange={(e) => setNewRoomName(e.target.value)}
-                  className="block w-full px-4 py-3 border border-zinc-800 rounded-md bg-black focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-white placeholder:text-zinc-600 outline-none"
+                  className="block w-full px-4 py-3 border border-zinc-800 rounded-md bg-black focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-white placeholder:text-zinc-600 outline-none disabled:opacity-50"
                   placeholder="e.g. gaming"
                 />
               </div>
@@ -1215,25 +1296,34 @@ export function Chat({ user, onLogout }: ChatProps) {
                 <label className="block text-sm font-bold text-zinc-400">Description (Optional)</label>
                 <input
                   type="text"
+                  disabled={isCreatingRoom}
                   value={newRoomDesc}
                   onChange={(e) => setNewRoomDesc(e.target.value)}
-                  className="block w-full px-4 py-3 border border-zinc-800 rounded-md bg-black focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-white placeholder:text-zinc-600 outline-none"
+                  className="block w-full px-4 py-3 border border-zinc-800 rounded-md bg-black focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors text-white placeholder:text-zinc-600 outline-none disabled:opacity-50"
                   placeholder="What's this channel about?"
                 />
               </div>
+              {createRoomError && (
+                 <div className="text-xs text-red-500 flex items-center gap-1">
+                   <AlertCircle className="w-3 h-3" />
+                   {createRoomError}
+                 </div>
+              )}
               <div className="pt-4 flex gap-3">
                 <button
                   type="button"
+                  disabled={isCreatingRoom}
                   onClick={() => setShowCreateRoom(false)}
-                  className="flex-1 py-3 px-4 bg-transparent hover:bg-zinc-900 text-white rounded-full font-bold transition-colors border border-zinc-800"
+                  className="flex-1 py-3 px-4 bg-transparent hover:bg-zinc-900 border border-zinc-800 text-white rounded-full font-bold transition-colors disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-3 px-4 bg-white hover:bg-zinc-200 text-black rounded-full font-bold transition-colors"
+                  disabled={isCreatingRoom || !newRoomName.trim()}
+                  className="flex-1 py-3 px-4 bg-white hover:bg-zinc-200 text-black rounded-full font-bold transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  Create
+                  {isCreatingRoom ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Create'}
                 </button>
               </div>
             </form>

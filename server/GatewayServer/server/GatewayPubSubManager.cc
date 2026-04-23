@@ -37,31 +37,7 @@ GatewayPubSubManager::GatewayPubSubManager() {
     this->sub_->on_message([this] (std::string channel, std::string msg) {
         std::string roomid = channel;
 
-        if(roomid.rfind("room1:", 0) == 0) {
-            roomid = channel.substr(6);
-
-            for(EventLoop* loop : GatewayPubSubManager::all_io_loops_) {
-                loop->runInLoop([roomid, msg] () {
-                    int32_t userid = std::stoi(msg);
-                    auto it = LocalWebsockConnhash.find(userid);
-
-                    if(it != LocalWebsockConnhash.end()) {
-                        auto& conns = LocalWebsockConnRoomhash[roomid];
-                        bool needSubscribeToRedisPub = conns.empty() ? true : false;
-
-                        it->second->room_index_ = conns.size();
-                        conns.push_back(it->second);
-                        if(needSubscribeToRedisPub) GatewayPubSubManager::SubscribeRoomSafe(roomid);
-
-                        it->second->addRoom(roomid);
-                    }
-                });
-            }
-
-            return;
-        }
-
-        if(roomid.rfind("room0:", 0) == 0) roomid = channel.substr(6);
+        if(roomid.rfind("room:", 0) == 0) roomid = channel.substr(5);
 
         std::shared_ptr<std::string> shared_ws_frame = std::make_shared<std::string>(buildWebSocketFrame(msg, 0x02));
 
