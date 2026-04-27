@@ -10,7 +10,8 @@ import {
   BatchPullMessagePayload,
   BatchPullMessageItem,
   SignalingFromClientPayload,
-  SignalingFromClientJoinPayload
+  SignalingFromClientJoinPayload,
+  PingPayload
 } from '../generated/chat_app';
 
 export function encodeClientMessage(roomId: string, clientMessageId: string, content: string, msgType: 'text' | 'image' = 'text', imageUrl?: string): Uint8Array {
@@ -29,12 +30,10 @@ export function encodeClientMessage(roomId: string, clientMessageId: string, con
   }
   const itemOffset = ClientMessageItem.endClientMessageItem(builder);
 
-  const messagesOffset = ClientMessagePayload.createMessagesVector(builder, [itemOffset]);
-
   ClientMessagePayload.startClientMessagePayload(builder);
   ClientMessagePayload.addRoomId(builder, roomIdOffset);
   ClientMessagePayload.addClientMessageId(builder, clientIdOffset);
-  ClientMessagePayload.addMessages(builder, messagesOffset);
+  ClientMessagePayload.addMessages(builder, itemOffset);
   const payloadOffset = ClientMessagePayload.endClientMessagePayload(builder);
 
   RootMessage.startRootMessage(builder);
@@ -149,6 +148,23 @@ export function encodeSignalingFromClientJoin(action: string, roomId: string, ro
 
   RootMessage.startRootMessage(builder);
   RootMessage.addPayloadType(builder, AnyPayload.SignalingFromClientJoinPayload);
+  RootMessage.addPayload(builder, payloadOffset);
+  const rootOffset = RootMessage.endRootMessage(builder);
+
+  builder.finish(rootOffset);
+  return builder.asUint8Array();
+}
+
+
+export function encodePing(ts: number): Uint8Array {
+  const builder = new flatbuffers.Builder(1024);
+
+  PingPayload.startPingPayload(builder);
+  PingPayload.addTs(builder, BigInt(ts));
+  const payloadOffset = PingPayload.endPingPayload(builder);
+
+  RootMessage.startRootMessage(builder);
+  RootMessage.addPayloadType(builder, AnyPayload.PingPayload);
   RootMessage.addPayload(builder, payloadOffset);
   const rootOffset = RootMessage.endRootMessage(builder);
 

@@ -1,0 +1,3 @@
+add_library(push_concurrency INTERFACE)
+
+target_include_directories(push_concurrency INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})

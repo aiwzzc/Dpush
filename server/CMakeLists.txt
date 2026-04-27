@@ -7,12 +7,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-
-add_subdirectory(GatewayServer)
-add_subdirectory(AuthServer)
-add_subdirectory(RoomServer)
-add_subdirectory(LogicServer)
+add_subdirectory(libs)
+add_subdirectory(services)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     message("Compile Debug")

@@ -7,6 +7,11 @@ enum MsgContentType : byte {
     Audio = 3 
 } 
 
+enum ChatType : byte {
+    Single = 1,
+    Group = 2
+}
+
 table User { 
     userid: long; 
     username: string; 
@@ -54,18 +59,20 @@ table RequestMessageItem {
 } 
 
 table ClientMessagePayload { 
-    room_id: string;         
+    chat_type: ChatType = Group;
+    target_id: string;         
     client_message_id: string;
-    messages: [ClientMessageItem]; 
+    messages: ClientMessageItem; 
 } 
 
 table ServerMessagePayload { 
-    room_id: string; 
-    messages: [ServerMessageItem]; 
+    chat_type: ChatType = Group;
+    session_id: string; 
+    messages: ServerMessageItem; 
 } 
 
 table PullMissingMessagePayload { 
-    room_id: string;  
+    room_id: string;
     missing_message_ids: [long]; 
 } 
 
@@ -124,6 +131,23 @@ table SignalingFromClientJoinPayload {
     room_name: string;
 }
 
+table PingPayload {
+    ts: uint64;
+}
+
+table PongPayload {
+    ts: uint64;
+}
+
+table ByteChunk {
+    data: [ubyte];
+}
+
+table batchPullRoomHistoryPayload {
+    room_id: string;
+    history_chunks: [ByteChunk];
+}
+
 union AnyPayload {
     HelloMessagePayload,
     ClientMessagePayload, 
@@ -136,7 +160,10 @@ union AnyPayload {
     JoinSessionPayload,
     SignalingFromClientPayload,
     SignalingFromServerPayload,
-    SignalingFromClientJoinPayload
+    SignalingFromClientJoinPayload,
+    PingPayload,
+    PongPayload,
+    batchPullRoomHistoryPayload
 } 
 
 table RootMessage { 

@@ -72,6 +72,18 @@ struct SignalingFromServerPayloadBuilder;
 struct SignalingFromClientJoinPayload;
 struct SignalingFromClientJoinPayloadBuilder;
 
+struct PingPayload;
+struct PingPayloadBuilder;
+
+struct PongPayload;
+struct PongPayloadBuilder;
+
+struct ByteChunk;
+struct ByteChunkBuilder;
+
+struct batchPullRoomHistoryPayload;
+struct batchPullRoomHistoryPayloadBuilder;
+
 struct RootMessage;
 struct RootMessageBuilder;
 
@@ -111,6 +123,36 @@ inline const char *EnumNameMsgContentType(MsgContentType e) {
   return EnumNamesMsgContentType()[index];
 }
 
+enum ChatType : int8_t {
+  ChatType_Single = 1,
+  ChatType_Group = 2,
+  ChatType_MIN = ChatType_Single,
+  ChatType_MAX = ChatType_Group
+};
+
+inline const ChatType (&EnumValuesChatType())[2] {
+  static const ChatType values[] = {
+    ChatType_Single,
+    ChatType_Group
+  };
+  return values;
+}
+
+inline const char * const *EnumNamesChatType() {
+  static const char * const names[3] = {
+    "Single",
+    "Group",
+    nullptr
+  };
+  return names;
+}
+
+inline const char *EnumNameChatType(ChatType e) {
+  if (flatbuffers::IsOutRange(e, ChatType_Single, ChatType_Group)) return "";
+  const size_t index = static_cast<size_t>(e) - static_cast<size_t>(ChatType_Single);
+  return EnumNamesChatType()[index];
+}
+
 enum AnyPayload : uint8_t {
   AnyPayload_NONE = 0,
   AnyPayload_HelloMessagePayload = 1,
@@ -125,11 +167,14 @@ enum AnyPayload : uint8_t {
   AnyPayload_SignalingFromClientPayload = 10,
   AnyPayload_SignalingFromServerPayload = 11,
   AnyPayload_SignalingFromClientJoinPayload = 12,
+  AnyPayload_PingPayload = 13,
+  AnyPayload_PongPayload = 14,
+  AnyPayload_batchPullRoomHistoryPayload = 15,
   AnyPayload_MIN = AnyPayload_NONE,
-  AnyPayload_MAX = AnyPayload_SignalingFromClientJoinPayload
+  AnyPayload_MAX = AnyPayload_batchPullRoomHistoryPayload
 };
 
-inline const AnyPayload (&EnumValuesAnyPayload())[13] {
+inline const AnyPayload (&EnumValuesAnyPayload())[16] {
   static const AnyPayload values[] = {
     AnyPayload_NONE,
     AnyPayload_HelloMessagePayload,
@@ -143,13 +188,16 @@ inline const AnyPayload (&EnumValuesAnyPayload())[13] {
     AnyPayload_JoinSessionPayload,
     AnyPayload_SignalingFromClientPayload,
     AnyPayload_SignalingFromServerPayload,
-    AnyPayload_SignalingFromClientJoinPayload
+    AnyPayload_SignalingFromClientJoinPayload,
+    AnyPayload_PingPayload,
+    AnyPayload_PongPayload,
+    AnyPayload_batchPullRoomHistoryPayload
   };
   return values;
 }
 
 inline const char * const *EnumNamesAnyPayload() {
-  static const char * const names[14] = {
+  static const char * const names[17] = {
     "NONE",
     "HelloMessagePayload",
     "ClientMessagePayload",
@@ -163,13 +211,16 @@ inline const char * const *EnumNamesAnyPayload() {
     "SignalingFromClientPayload",
     "SignalingFromServerPayload",
     "SignalingFromClientJoinPayload",
+    "PingPayload",
+    "PongPayload",
+    "batchPullRoomHistoryPayload",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameAnyPayload(AnyPayload e) {
-  if (flatbuffers::IsOutRange(e, AnyPayload_NONE, AnyPayload_SignalingFromClientJoinPayload)) return "";
+  if (flatbuffers::IsOutRange(e, AnyPayload_NONE, AnyPayload_batchPullRoomHistoryPayload)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesAnyPayload()[index];
 }
@@ -224,6 +275,18 @@ template<> struct AnyPayloadTraits<ChatApp::SignalingFromServerPayload> {
 
 template<> struct AnyPayloadTraits<ChatApp::SignalingFromClientJoinPayload> {
   static const AnyPayload enum_value = AnyPayload_SignalingFromClientJoinPayload;
+};
+
+template<> struct AnyPayloadTraits<ChatApp::PingPayload> {
+  static const AnyPayload enum_value = AnyPayload_PingPayload;
+};
+
+template<> struct AnyPayloadTraits<ChatApp::PongPayload> {
+  static const AnyPayload enum_value = AnyPayload_PongPayload;
+};
+
+template<> struct AnyPayloadTraits<ChatApp::batchPullRoomHistoryPayload> {
+  static const AnyPayload enum_value = AnyPayload_batchPullRoomHistoryPayload;
 };
 
 bool VerifyAnyPayload(flatbuffers::Verifier &verifier, const void *obj, AnyPayload type);
@@ -824,28 +887,32 @@ inline flatbuffers::Offset<RequestMessageItem> CreateRequestMessageItemDirect(
 struct ClientMessagePayload FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   typedef ClientMessagePayloadBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
-    VT_ROOM_ID = 4,
-    VT_CLIENT_MESSAGE_ID = 6,
-    VT_MESSAGES = 8
+    VT_CHAT_TYPE = 4,
+    VT_TARGET_ID = 6,
+    VT_CLIENT_MESSAGE_ID = 8,
+    VT_MESSAGES = 10
   };
-  const flatbuffers::String *room_id() const {
-    return GetPointer<const flatbuffers::String *>(VT_ROOM_ID);
+  ChatApp::ChatType chat_type() const {
+    return static_cast<ChatApp::ChatType>(GetField<int8_t>(VT_CHAT_TYPE, 2));
+  }
+  const flatbuffers::String *target_id() const {
+    return GetPointer<const flatbuffers::String *>(VT_TARGET_ID);
   }
   const flatbuffers::String *client_message_id() const {
     return GetPointer<const flatbuffers::String *>(VT_CLIENT_MESSAGE_ID);
   }
-  const flatbuffers::Vector<flatbuffers::Offset<ChatApp::ClientMessageItem>> *messages() const {
-    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<ChatApp::ClientMessageItem>> *>(VT_MESSAGES);
+  const ChatApp::ClientMessageItem *messages() const {
+    return GetPointer<const ChatApp::ClientMessageItem *>(VT_MESSAGES);
   }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyOffset(verifier, VT_ROOM_ID) &&
-           verifier.VerifyString(room_id()) &&
+           VerifyField<int8_t>(verifier, VT_CHAT_TYPE, 1) &&
+           VerifyOffset(verifier, VT_TARGET_ID) &&
+           verifier.VerifyString(target_id()) &&
            VerifyOffset(verifier, VT_CLIENT_MESSAGE_ID) &&
            verifier.VerifyString(client_message_id()) &&
            VerifyOffset(verifier, VT_MESSAGES) &&
-           verifier.VerifyVector(messages()) &&
-           verifier.VerifyVectorOfTables(messages()) &&
+           verifier.VerifyTable(messages()) &&
            verifier.EndTable();
   }
 };
@@ -854,13 +921,16 @@ struct ClientMessagePayloadBuilder {
   typedef ClientMessagePayload Table;
   flatbuffers::FlatBufferBuilder &fbb_;
   flatbuffers::uoffset_t start_;
-  void add_room_id(flatbuffers::Offset<flatbuffers::String> room_id) {
-    fbb_.AddOffset(ClientMessagePayload::VT_ROOM_ID, room_id);
+  void add_chat_type(ChatApp::ChatType chat_type) {
+    fbb_.AddElement<int8_t>(ClientMessagePayload::VT_CHAT_TYPE, static_cast<int8_t>(chat_type), 2);
+  }
+  void add_target_id(flatbuffers::Offset<flatbuffers::String> target_id) {
+    fbb_.AddOffset(ClientMessagePayload::VT_TARGET_ID, target_id);
   }
   void add_client_message_id(flatbuffers::Offset<flatbuffers::String> client_message_id) {
     fbb_.AddOffset(ClientMessagePayload::VT_CLIENT_MESSAGE_ID, client_message_id);
   }
-  void add_messages(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<ChatApp::ClientMessageItem>>> messages) {
+  void add_messages(flatbuffers::Offset<ChatApp::ClientMessageItem> messages) {
     fbb_.AddOffset(ClientMessagePayload::VT_MESSAGES, messages);
   }
   explicit ClientMessagePayloadBuilder(flatbuffers::FlatBufferBuilder &_fbb)
@@ -876,50 +946,57 @@ struct ClientMessagePayloadBuilder {
 
 inline flatbuffers::Offset<ClientMessagePayload> CreateClientMessagePayload(
     flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::String> room_id = 0,
+    ChatApp::ChatType chat_type = ChatApp::ChatType_Group,
+    flatbuffers::Offset<flatbuffers::String> target_id = 0,
     flatbuffers::Offset<flatbuffers::String> client_message_id = 0,
-    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<ChatApp::ClientMessageItem>>> messages = 0) {
+    flatbuffers::Offset<ChatApp::ClientMessageItem> messages = 0) {
   ClientMessagePayloadBuilder builder_(_fbb);
   builder_.add_messages(messages);
   builder_.add_client_message_id(client_message_id);
-  builder_.add_room_id(room_id);
+  builder_.add_target_id(target_id);
+  builder_.add_chat_type(chat_type);
   return builder_.Finish();
 }
 
 inline flatbuffers::Offset<ClientMessagePayload> CreateClientMessagePayloadDirect(
     flatbuffers::FlatBufferBuilder &_fbb,
-    const char *room_id = nullptr,
+    ChatApp::ChatType chat_type = ChatApp::ChatType_Group,
+    const char *target_id = nullptr,
     const char *client_message_id = nullptr,
-    const std::vector<flatbuffers::Offset<ChatApp::ClientMessageItem>> *messages = nullptr) {
-  auto room_id__ = room_id ? _fbb.CreateString(room_id) : 0;
+    flatbuffers::Offset<ChatApp::ClientMessageItem> messages = 0) {
+  auto target_id__ = target_id ? _fbb.CreateString(target_id) : 0;
   auto client_message_id__ = client_message_id ? _fbb.CreateString(client_message_id) : 0;
-  auto messages__ = messages ? _fbb.CreateVector<flatbuffers::Offset<ChatApp::ClientMessageItem>>(*messages) : 0;
   return ChatApp::CreateClientMessagePayload(
       _fbb,
-      room_id__,
+      chat_type,
+      target_id__,
       client_message_id__,
-      messages__);
+      messages);
 }
 
 struct ServerMessagePayload FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   typedef ServerMessagePayloadBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
-    VT_ROOM_ID = 4,
-    VT_MESSAGES = 6
+    VT_CHAT_TYPE = 4,
+    VT_SESSION_ID = 6,
+    VT_MESSAGES = 8
   };
-  const flatbuffers::String *room_id() const {
-    return GetPointer<const flatbuffers::String *>(VT_ROOM_ID);
+  ChatApp::ChatType chat_type() const {
+    return static_cast<ChatApp::ChatType>(GetField<int8_t>(VT_CHAT_TYPE, 2));
   }
-  const flatbuffers::Vector<flatbuffers::Offset<ChatApp::ServerMessageItem>> *messages() const {
-    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<ChatApp::ServerMessageItem>> *>(VT_MESSAGES);
+  const flatbuffers::String *session_id() const {
+    return GetPointer<const flatbuffers::String *>(VT_SESSION_ID);
+  }
+  const ChatApp::ServerMessageItem *messages() const {
+    return GetPointer<const ChatApp::ServerMessageItem *>(VT_MESSAGES);
   }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyOffset(verifier, VT_ROOM_ID) &&
-           verifier.VerifyString(room_id()) &&
+           VerifyField<int8_t>(verifier, VT_CHAT_TYPE, 1) &&
+           VerifyOffset(verifier, VT_SESSION_ID) &&
+           verifier.VerifyString(session_id()) &&
            VerifyOffset(verifier, VT_MESSAGES) &&
-           verifier.VerifyVector(messages()) &&
-           verifier.VerifyVectorOfTables(messages()) &&
+           verifier.VerifyTable(messages()) &&
            verifier.EndTable();
   }
 };
@@ -928,10 +1005,13 @@ struct ServerMessagePayloadBuilder {
   typedef ServerMessagePayload Table;
   flatbuffers::FlatBufferBuilder &fbb_;
   flatbuffers::uoffset_t start_;
-  void add_room_id(flatbuffers::Offset<flatbuffers::String> room_id) {
-    fbb_.AddOffset(ServerMessagePayload::VT_ROOM_ID, room_id);
+  void add_chat_type(ChatApp::ChatType chat_type) {
+    fbb_.AddElement<int8_t>(ServerMessagePayload::VT_CHAT_TYPE, static_cast<int8_t>(chat_type), 2);
   }
-  void add_messages(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<ChatApp::ServerMessageItem>>> messages) {
+  void add_session_id(flatbuffers::Offset<flatbuffers::String> session_id) {
+    fbb_.AddOffset(ServerMessagePayload::VT_SESSION_ID, session_id);
+  }
+  void add_messages(flatbuffers::Offset<ChatApp::ServerMessageItem> messages) {
     fbb_.AddOffset(ServerMessagePayload::VT_MESSAGES, messages);
   }
   explicit ServerMessagePayloadBuilder(flatbuffers::FlatBufferBuilder &_fbb)
@@ -947,24 +1027,27 @@ struct ServerMessagePayloadBuilder {
 
 inline flatbuffers::Offset<ServerMessagePayload> CreateServerMessagePayload(
     flatbuffers::FlatBufferBuilder &_fbb,
-    flatbuffers::Offset<flatbuffers::String> room_id = 0,
-    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<ChatApp::ServerMessageItem>>> messages = 0) {
+    ChatApp::ChatType chat_type = ChatApp::ChatType_Group,
+    flatbuffers::Offset<flatbuffers::String> session_id = 0,
+    flatbuffers::Offset<ChatApp::ServerMessageItem> messages = 0) {
   ServerMessagePayloadBuilder builder_(_fbb);
   builder_.add_messages(messages);
-  builder_.add_room_id(room_id);
+  builder_.add_session_id(session_id);
+  builder_.add_chat_type(chat_type);
   return builder_.Finish();
 }
 
 inline flatbuffers::Offset<ServerMessagePayload> CreateServerMessagePayloadDirect(
     flatbuffers::FlatBufferBuilder &_fbb,
-    const char *room_id = nullptr,
-    const std::vector<flatbuffers::Offset<ChatApp::ServerMessageItem>> *messages = nullptr) {
-  auto room_id__ = room_id ? _fbb.CreateString(room_id) : 0;
-  auto messages__ = messages ? _fbb.CreateVector<flatbuffers::Offset<ChatApp::ServerMessageItem>>(*messages) : 0;
+    ChatApp::ChatType chat_type = ChatApp::ChatType_Group,
+    const char *session_id = nullptr,
+    flatbuffers::Offset<ChatApp::ServerMessageItem> messages = 0) {
+  auto session_id__ = session_id ? _fbb.CreateString(session_id) : 0;
   return ChatApp::CreateServerMessagePayload(
       _fbb,
-      room_id__,
-      messages__);
+      chat_type,
+      session_id__,
+      messages);
 }
 
 struct PullMissingMessagePayload FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
@@ -1749,6 +1832,205 @@ inline flatbuffers::Offset<SignalingFromClientJoinPayload> CreateSignalingFromCl
       room_name__);
 }
 
+struct PingPayload FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef PingPayloadBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_TS = 4
+  };
+  uint64_t ts() const {
+    return GetField<uint64_t>(VT_TS, 0);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<uint64_t>(verifier, VT_TS, 8) &&
+           verifier.EndTable();
+  }
+};
+
+struct PingPayloadBuilder {
+  typedef PingPayload Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_ts(uint64_t ts) {
+    fbb_.AddElement<uint64_t>(PingPayload::VT_TS, ts, 0);
+  }
+  explicit PingPayloadBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  flatbuffers::Offset<PingPayload> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<PingPayload>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<PingPayload> CreatePingPayload(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    uint64_t ts = 0) {
+  PingPayloadBuilder builder_(_fbb);
+  builder_.add_ts(ts);
+  return builder_.Finish();
+}
+
+struct PongPayload FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef PongPayloadBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_TS = 4
+  };
+  uint64_t ts() const {
+    return GetField<uint64_t>(VT_TS, 0);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<uint64_t>(verifier, VT_TS, 8) &&
+           verifier.EndTable();
+  }
+};
+
+struct PongPayloadBuilder {
+  typedef PongPayload Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_ts(uint64_t ts) {
+    fbb_.AddElement<uint64_t>(PongPayload::VT_TS, ts, 0);
+  }
+  explicit PongPayloadBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  flatbuffers::Offset<PongPayload> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<PongPayload>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<PongPayload> CreatePongPayload(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    uint64_t ts = 0) {
+  PongPayloadBuilder builder_(_fbb);
+  builder_.add_ts(ts);
+  return builder_.Finish();
+}
+
+struct ByteChunk FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef ByteChunkBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_DATA = 4
+  };
+  const flatbuffers::Vector<uint8_t> *data() const {
+    return GetPointer<const flatbuffers::Vector<uint8_t> *>(VT_DATA);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_DATA) &&
+           verifier.VerifyVector(data()) &&
+           verifier.EndTable();
+  }
+};
+
+struct ByteChunkBuilder {
+  typedef ByteChunk Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_data(flatbuffers::Offset<flatbuffers::Vector<uint8_t>> data) {
+    fbb_.AddOffset(ByteChunk::VT_DATA, data);
+  }
+  explicit ByteChunkBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  flatbuffers::Offset<ByteChunk> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<ByteChunk>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<ByteChunk> CreateByteChunk(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    flatbuffers::Offset<flatbuffers::Vector<uint8_t>> data = 0) {
+  ByteChunkBuilder builder_(_fbb);
+  builder_.add_data(data);
+  return builder_.Finish();
+}
+
+inline flatbuffers::Offset<ByteChunk> CreateByteChunkDirect(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    const std::vector<uint8_t> *data = nullptr) {
+  auto data__ = data ? _fbb.CreateVector<uint8_t>(*data) : 0;
+  return ChatApp::CreateByteChunk(
+      _fbb,
+      data__);
+}
+
+struct batchPullRoomHistoryPayload FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef batchPullRoomHistoryPayloadBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_ROOM_ID = 4,
+    VT_HISTORY_CHUNKS = 6
+  };
+  const flatbuffers::String *room_id() const {
+    return GetPointer<const flatbuffers::String *>(VT_ROOM_ID);
+  }
+  const flatbuffers::Vector<flatbuffers::Offset<ChatApp::ByteChunk>> *history_chunks() const {
+    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<ChatApp::ByteChunk>> *>(VT_HISTORY_CHUNKS);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_ROOM_ID) &&
+           verifier.VerifyString(room_id()) &&
+           VerifyOffset(verifier, VT_HISTORY_CHUNKS) &&
+           verifier.VerifyVector(history_chunks()) &&
+           verifier.VerifyVectorOfTables(history_chunks()) &&
+           verifier.EndTable();
+  }
+};
+
+struct batchPullRoomHistoryPayloadBuilder {
+  typedef batchPullRoomHistoryPayload Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_room_id(flatbuffers::Offset<flatbuffers::String> room_id) {
+    fbb_.AddOffset(batchPullRoomHistoryPayload::VT_ROOM_ID, room_id);
+  }
+  void add_history_chunks(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<ChatApp::ByteChunk>>> history_chunks) {
+    fbb_.AddOffset(batchPullRoomHistoryPayload::VT_HISTORY_CHUNKS, history_chunks);
+  }
+  explicit batchPullRoomHistoryPayloadBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  flatbuffers::Offset<batchPullRoomHistoryPayload> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<batchPullRoomHistoryPayload>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<batchPullRoomHistoryPayload> CreatebatchPullRoomHistoryPayload(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    flatbuffers::Offset<flatbuffers::String> room_id = 0,
+    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<ChatApp::ByteChunk>>> history_chunks = 0) {
+  batchPullRoomHistoryPayloadBuilder builder_(_fbb);
+  builder_.add_history_chunks(history_chunks);
+  builder_.add_room_id(room_id);
+  return builder_.Finish();
+}
+
+inline flatbuffers::Offset<batchPullRoomHistoryPayload> CreatebatchPullRoomHistoryPayloadDirect(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    const char *room_id = nullptr,
+    const std::vector<flatbuffers::Offset<ChatApp::ByteChunk>> *history_chunks = nullptr) {
+  auto room_id__ = room_id ? _fbb.CreateString(room_id) : 0;
+  auto history_chunks__ = history_chunks ? _fbb.CreateVector<flatbuffers::Offset<ChatApp::ByteChunk>>(*history_chunks) : 0;
+  return ChatApp::CreatebatchPullRoomHistoryPayload(
+      _fbb,
+      room_id__,
+      history_chunks__);
+}
+
 struct RootMessage FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   typedef RootMessageBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -1797,6 +2079,15 @@ struct RootMessage FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   }
   const ChatApp::SignalingFromClientJoinPayload *payload_as_SignalingFromClientJoinPayload() const {
     return payload_type() == ChatApp::AnyPayload_SignalingFromClientJoinPayload ? static_cast<const ChatApp::SignalingFromClientJoinPayload *>(payload()) : nullptr;
+  }
+  const ChatApp::PingPayload *payload_as_PingPayload() const {
+    return payload_type() == ChatApp::AnyPayload_PingPayload ? static_cast<const ChatApp::PingPayload *>(payload()) : nullptr;
+  }
+  const ChatApp::PongPayload *payload_as_PongPayload() const {
+    return payload_type() == ChatApp::AnyPayload_PongPayload ? static_cast<const ChatApp::PongPayload *>(payload()) : nullptr;
+  }
+  const ChatApp::batchPullRoomHistoryPayload *payload_as_batchPullRoomHistoryPayload() const {
+    return payload_type() == ChatApp::AnyPayload_batchPullRoomHistoryPayload ? static_cast<const ChatApp::batchPullRoomHistoryPayload *>(payload()) : nullptr;
   }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -1853,6 +2144,18 @@ template<> inline const ChatApp::SignalingFromServerPayload *RootMessage::payloa
 
 template<> inline const ChatApp::SignalingFromClientJoinPayload *RootMessage::payload_as<ChatApp::SignalingFromClientJoinPayload>() const {
   return payload_as_SignalingFromClientJoinPayload();
+}
+
+template<> inline const ChatApp::PingPayload *RootMessage::payload_as<ChatApp::PingPayload>() const {
+  return payload_as_PingPayload();
+}
+
+template<> inline const ChatApp::PongPayload *RootMessage::payload_as<ChatApp::PongPayload>() const {
+  return payload_as_PongPayload();
+}
+
+template<> inline const ChatApp::batchPullRoomHistoryPayload *RootMessage::payload_as<ChatApp::batchPullRoomHistoryPayload>() const {
+  return payload_as_batchPullRoomHistoryPayload();
 }
 
 struct RootMessageBuilder {
@@ -1937,6 +2240,18 @@ inline bool VerifyAnyPayload(flatbuffers::Verifier &verifier, const void *obj, A
     }
     case AnyPayload_SignalingFromClientJoinPayload: {
       auto ptr = reinterpret_cast<const ChatApp::SignalingFromClientJoinPayload *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case AnyPayload_PingPayload: {
+      auto ptr = reinterpret_cast<const ChatApp::PingPayload *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case AnyPayload_PongPayload: {
+      auto ptr = reinterpret_cast<const ChatApp::PongPayload *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case AnyPayload_batchPullRoomHistoryPayload: {
+      auto ptr = reinterpret_cast<const ChatApp::batchPullRoomHistoryPayload *>(obj);
       return verifier.VerifyTable(ptr);
     }
     default: return true;

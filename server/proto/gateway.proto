@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package gateway;
+
+message sendSingleMsgRequest {
+    bytes message = 1;
+}
+
+message sendSingleMsgResponse {
+
+}
+
+service GatewayServer {
+    rpc sendSingleMsg (sendSingleMsgRequest) returns (sendSingleMsgResponse);
+}

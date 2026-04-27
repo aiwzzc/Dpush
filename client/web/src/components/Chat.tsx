@@ -4,8 +4,8 @@ import { Send, Image as ImageIcon, LogOut, Sparkles, Loader2, Hash, Plus, X, Use
 import { GoogleGenAI } from '@google/genai';
 import * as flatbuffers from 'flatbuffers';
 import localforage from 'localforage';
-import { RootMessage, AnyPayload, ServerMessagePayload, RequestMessagePayload, MessageAckPayload, MsgContentType, SignalingFromServerPayload } from '../generated/chat_app';
-import { encodeClientMessage, encodePullMissingMessages, encodeRequestRoomHistory, encodeBatchPullMessage, encodeSignalingFromClient, encodeSignalingFromClientJoin } from '../utils/fb-helper';
+import { RootMessage, AnyPayload, ServerMessagePayload, RequestMessagePayload, MessageAckPayload, MsgContentType, SignalingFromServerPayload, PongPayload, BatchPullRoomHistoryPayload, ServerMessageItem } from '../generated/chat_app';
+import { encodeClientMessage, encodePullMissingMessages, encodeRequestRoomHistory, encodeBatchPullMessage, encodeSignalingFromClient, encodeSignalingFromClientJoin, encodePing } from '../utils/fb-helper';
 import { JoinSessionPayload } from '../generated/chat_app';
 
 // 智能解析时间戳（兼容秒级和毫秒级）
@@ -48,6 +48,11 @@ export function Chat({ user, onLogout }: ChatProps) {
   const [joinRoomError, setJoinRoomError] = useState('');
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [createRoomError, setCreateRoomError] = useState('');
+
+  // 网络状态相关状态
+  const [connectionState, setConnectionState] = useState<'connected' | 'connecting' | 'disconnected'>('connecting');
+  const [rtt, setRtt] = useState<number | null>(null);
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
   
   const pendingCreateRoomNameRef = useRef<string | null>(null);
   const pendingCreateRoomDescRef = useRef<string | null>(null);
@@ -62,6 +67,13 @@ export function Chat({ user, onLogout }: ChatProps) {
   const roomMaxServerMsgIdRef = useRef<Record<string, number>>({});
   const pendingMessagesRef = useRef<Record<string, Record<number, any>>>({});
   const roomsRef = useRef<Room[]>([]);
+  
+  const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectAttemptRef = useRef<number>(0);
+  const isConnectingRef = useRef<boolean>(false);
+  const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     roomsRef.current = rooms;
@@ -146,12 +158,14 @@ export function Chat({ user, onLogout }: ChatProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // 初始化 WebSocket 连接
-  useEffect(() => {
-    if (!isLocalLoaded) return;
+  const connectWebSocket = () => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
+    if (isConnectingRef.current) return;
+    isConnectingRef.current = true;
+
+    setConnectionState(reconnectAttemptRef.current < 2 && reconnectAttemptRef.current > 0 ? 'connecting' : (reconnectAttemptRef.current >= 2 ? 'disconnected' : 'connecting'));
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // 假设后端的 websocket 路径是 /ws
     const wsUrl = `${protocol}//${window.location.host}/ws`;
     const socket = new WebSocket(wsUrl);
 
@@ -159,6 +173,36 @@ export function Chat({ user, onLogout }: ChatProps) {
 
     socket.onopen = () => {
       console.log('WebSocket connected');
+      isConnectingRef.current = false;
+      setConnectionState('connected');
+      setReconnectAttempt(0);
+      reconnectAttemptRef.current = 0;
+      
+      // Clear timers
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+      if (pingTimeoutRef.current) clearTimeout(pingTimeoutRef.current);
+
+      setWs(socket);
+      wsRef.current = socket;
+
+      // Start ping interval
+      pingIntervalRef.current = setInterval(() => {
+        if (socket.readyState === WebSocket.OPEN) {
+          const ts = Date.now();
+          const buf = encodePing(ts);
+          socket.send(buf);
+
+          // Expect pong within 3s
+          pingTimeoutRef.current = setTimeout(() => {
+            console.log('Ping timeout, closing socket...');
+            if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+              socket.close();
+            }
+          }, 3000);
+        }
+      }, 30000);
+
       // 发起批量拉取消息
       const roomsToPull = roomsRef.current.length > 0 ? roomsRef.current : [];
       if (roomsToPull.length > 0) {
@@ -174,16 +218,129 @@ export function Chat({ user, onLogout }: ChatProps) {
     socket.onmessage = async (event) => {
       try {
         if (event.data instanceof ArrayBuffer || event.data instanceof Blob) {
-          // 处理 FlatBuffers 消息
           const arrayBuffer = event.data instanceof Blob ? await event.data.arrayBuffer() : event.data;
           const buf = new flatbuffers.ByteBuffer(new Uint8Array(arrayBuffer));
           const root = RootMessage.getRootAsRootMessage(buf);
           const payloadType = root.payloadType();
 
+          if (payloadType === AnyPayload.PongPayload) {
+            const pongPayload = root.payload(new PongPayload()) as PongPayload;
+            const originTs = Number(pongPayload.ts());
+            const currentRtt = Date.now() - originTs;
+            setRtt(currentRtt);
+            if (pingTimeoutRef.current) {
+              clearTimeout(pingTimeoutRef.current);
+              pingTimeoutRef.current = null;
+            }
+            return;
+          }
+
+          if (payloadType === AnyPayload.BatchPullRoomHistoryPayload) {
+            const payload = root.payload(new BatchPullRoomHistoryPayload()) as BatchPullRoomHistoryPayload;
+            const roomId = payload.roomId() || 'general';
+            const chunksLen = payload.historyChunksLength();
+
+            const newMsgs: Message[] = [];
+            for (let i = 0; i < chunksLen; i++) {
+              const chunk = payload.historyChunks(i);
+              const dataArray = chunk?.dataArray();
+              if (dataArray) {
+                try {
+                  const chunkBuf = new flatbuffers.ByteBuffer(dataArray);
+                  const pos = chunkBuf.readInt32(chunkBuf.position()) + chunkBuf.position();
+                  
+                  const itemCheck = new ServerMessageItem();
+                  itemCheck.__init(pos, chunkBuf);
+                  
+                  let parsedMsgs: Message[] = [];
+                  
+                  if (itemCheck.timestamp() > 0n || itemCheck.user() !== null) {
+                      parsedMsgs.push({
+                        id: itemCheck.serverMessageId()?.toString() || Date.now().toString(),
+                        clientMessageId: itemCheck.clientMessageId() || undefined,
+                        serverMessageId: Number(itemCheck.serverMessageId()),
+                        sender: itemCheck.user()?.username() || 'Unknown',
+                        content: itemCheck.content() || '',
+                        timestamp: parseTimestamp(Number(itemCheck.timestamp())),
+                        type: itemCheck.msgType() === MsgContentType.Image ? 'image' : 'text',
+                        imageUrl: itemCheck.imageUrl() || undefined,
+                        status: 'success'
+                      });
+                  } else {
+                      let serverPayload: ServerMessagePayload | null = null;
+                      try {
+                        const rootMsg = RootMessage.getRootAsRootMessage(chunkBuf);
+                        if (rootMsg.payloadType() === AnyPayload.ServerMessagePayload) {
+                           serverPayload = rootMsg.payload(new ServerMessagePayload()) as ServerMessagePayload;
+                        }
+                      } catch (e) {}
+  
+                      if (!serverPayload) {
+                        serverPayload = new ServerMessagePayload();
+                        serverPayload.__init(pos, chunkBuf);
+                      }
+  
+                      if (serverPayload) {
+                         try {
+                           const item = serverPayload.messages();
+                           if (item) {
+                              const senderInfo = item.user()?.username();
+                              const contentInfo = item.content();
+                              
+                              // Make sure it is not a garbage parsed item
+                              if (senderInfo || contentInfo !== null || item.timestamp() > 0n) {
+                                parsedMsgs.push({
+                                  id: item.serverMessageId()?.toString() || Date.now().toString(),
+                                  clientMessageId: item.clientMessageId() || undefined,
+                                  serverMessageId: Number(item.serverMessageId()),
+                                  sender: senderInfo || 'Unknown',
+                                  content: contentInfo || '',
+                                  timestamp: parseTimestamp(Number(item.timestamp())),
+                                  type: item.msgType() === MsgContentType.Image ? 'image' : 'text',
+                                  imageUrl: item.imageUrl() || undefined,
+                                  status: 'success'
+                                });
+                              }
+                           }
+                         } catch (e) {
+                           console.error("Failed to parse inner ServerMessagePayload", e);
+                         }
+                      }
+                  }
+
+                  newMsgs.push(...parsedMsgs.filter(m => m.serverMessageId > 0 || m.content !== ''));
+                } catch (e) {
+                  console.error('Failed to parse chunk from BatchPullRoomHistoryPayload:', e);
+                }
+              }
+            }
+
+            if (newMsgs.length > 0) {
+              setMessages(prev => {
+                const existingMsgs = prev[roomId] || [];
+                const existingIds = new Set(existingMsgs.map(m => m.id));
+                const filtered = newMsgs.filter(m => !existingIds.has(m.id));
+                if (filtered.length === 0) return prev;
+                
+                const merged = [...existingMsgs, ...filtered].sort((a,b) => a.timestamp.getTime() - b.timestamp.getTime());
+                
+                let maxId = roomMaxServerMsgIdRef.current[roomId] || 0;
+                merged.forEach(m => {
+                  if (m.serverMessageId !== undefined && m.serverMessageId > maxId) {
+                    maxId = m.serverMessageId;
+                  }
+                });
+                roomMaxServerMsgIdRef.current[roomId] = maxId;
+
+                return { ...prev, [roomId]: merged };
+              });
+            }
+            return;
+          }
+
           if (payloadType === AnyPayload.ServerMessagePayload) {
             const payload = root.payload(new ServerMessagePayload()) as ServerMessagePayload;
             const roomId = payload.roomId() || 'general';
-            const messagesLen = payload.messagesLength();
             
             let messagesToAdd: Message[] = [];
             let hasNewMessages = false;
@@ -214,20 +371,18 @@ export function Chat({ user, onLogout }: ChatProps) {
             };
 
             const incomingMessages = [];
-            for (let i = 0; i < messagesLen; i++) {
-              const msg = payload.messages(i);
-              if (msg) {
-                incomingMessages.push({
-                  id: msg.serverMessageId().toString(),
-                  clientMessageId: msg.clientMessageId(),
-                  serverMessageId: Number(msg.serverMessageId()),
-                  content: msg.content(),
-                  user: { username: msg.user()?.username() || 'Unknown' },
-                  timestamp: Number(msg.timestamp()),
-                  msgType: msg.msgType() === MsgContentType.Image ? 'image' : 'text',
-                  imageUrl: msg.imageUrl() || undefined
-                });
-              }
+            const msg = payload.messages();
+            if (msg) {
+              incomingMessages.push({
+                id: msg.serverMessageId().toString(),
+                clientMessageId: msg.clientMessageId(),
+                serverMessageId: Number(msg.serverMessageId()),
+                content: msg.content(),
+                user: { username: msg.user()?.username() || 'Unknown' },
+                timestamp: Number(msg.timestamp()),
+                msgType: msg.msgType() === MsgContentType.Image ? 'image' : 'text',
+                imageUrl: msg.imageUrl() || undefined
+              });
             }
 
             // 按 serverMessageId 排序，以防后端批量下发时乱序
@@ -389,6 +544,19 @@ export function Chat({ user, onLogout }: ChatProps) {
                   clearInterval(networkRetryTimersRef.current[clientMessageId]);
                   delete networkRetryTimersRef.current[clientMessageId];
                 }
+                if (businessTimeoutTimersRef.current[clientMessageId]) {
+                  clearTimeout(businessTimeoutTimersRef.current[clientMessageId]);
+                  delete businessTimeoutTimersRef.current[clientMessageId];
+                }
+                setMessages(prev => {
+                  const newMessages = { ...prev };
+                  for (const rId in newMessages) {
+                    newMessages[rId] = newMessages[rId].map(m => 
+                      m.clientMessageId === clientMessageId ? { ...m, status: 'success' } : m
+                    );
+                  }
+                  return newMessages;
+                });
               } else {
                 if (networkRetryTimersRef.current[clientMessageId]) {
                   clearInterval(networkRetryTimersRef.current[clientMessageId]);
@@ -502,12 +670,51 @@ export function Chat({ user, onLogout }: ChatProps) {
 
     socket.onclose = () => {
       console.log('WebSocket disconnected');
+      isConnectingRef.current = false;
+      wsRef.current = null;
+      setWs(null);
+      handleReconnect();
     };
+  };
 
-    setWs(socket);
+  const handleReconnect = () => {
+    // Clear ping timers
+    if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+    if (pingTimeoutRef.current) clearTimeout(pingTimeoutRef.current);
 
+    const attempt = reconnectAttemptRef.current;
+    
+    // UI state
+    if (attempt < 2) {
+      setConnectionState('connecting');
+    } else {
+      setConnectionState('disconnected');
+    }
+
+    // Exponential backoff
+    const baseDelay = attempt === 0 ? 0 : Math.min(60000, Math.pow(2, attempt - 1) * 2000);
+    // Add jitter
+    const actualDelay = baseDelay * (0.8 + Math.random() * 0.4);
+
+    reconnectAttemptRef.current += 1;
+    setReconnectAttempt(reconnectAttemptRef.current);
+
+    console.log(`Reconnecting (attempt ${attempt + 1}) in ${Math.round(actualDelay)}ms...`);
+    
+    if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+    reconnectTimerRef.current = setTimeout(() => {
+      connectWebSocket();
+    }, actualDelay);
+  };
+
+  useEffect(() => {
+    if (!isLocalLoaded) return;
+    connectWebSocket();
     return () => {
-      socket.close();
+      if (wsRef.current) wsRef.current.close();
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+      if (pingTimeoutRef.current) clearTimeout(pingTimeoutRef.current);
     };
   }, [user.username, isLocalLoaded]);
 
@@ -527,9 +734,9 @@ export function Chat({ user, onLogout }: ChatProps) {
 
   const sendClientMessage = (roomId: string, content: string, clientMessageId: string, isRetry = false, msgType: 'text' | 'image' = 'text', imageUrl?: string) => {
     const sendToWs = () => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         const buf = encodeClientMessage(roomId, clientMessageId, content, msgType, imageUrl);
-        ws.send(buf);
+        wsRef.current.send(buf);
       }
     };
 
@@ -639,10 +846,10 @@ export function Chat({ user, onLogout }: ChatProps) {
       }
 
       // Send SignalingFromClientJoinPayload using FlatBuffers over WebSocket
-      if (ws && ws.readyState === WebSocket.OPEN) {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         // encodeSignalingFromClientJoin is imported from fb-helper
         const buf = encodeSignalingFromClientJoin("join_room", roomid.toString(), joinRoomQuery.trim());
-        ws.send(buf);
+        wsRef.current.send(buf);
 
         // 设置 WebSocket 确认超时
         setTimeout(() => {
@@ -746,9 +953,9 @@ export function Chat({ user, onLogout }: ChatProps) {
 
       // 将 AI 的回复通过 WebSocket 广播给房间里的其他人
       const aiClientMessageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-      if (ws && ws.readyState === WebSocket.OPEN) {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         const buf = encodeClientMessage(roomId, aiClientMessageId, aiReply, 'text');
-        ws.send(buf);
+        wsRef.current.send(buf);
       }
 
     } catch (error) {
@@ -807,9 +1014,9 @@ export function Chat({ user, onLogout }: ChatProps) {
       }
 
       // Send SignalingFromClientPayload using FlatBuffers over WebSocket
-      if (ws && ws.readyState === WebSocket.OPEN) {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         const buf = encodeSignalingFromClient("subscribe_room", roomid.toString());
-        ws.send(buf);
+        wsRef.current.send(buf);
 
         // 设置 WebSocket 确认超时
         setTimeout(() => {
@@ -909,9 +1116,9 @@ export function Chat({ user, onLogout }: ChatProps) {
 
         // 生成成功后，也可以将图片消息通过 WebSocket 广播给其他人
         const imgClientMessageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           const buf = encodeClientMessage(currentRoom.id, imgClientMessageId, prompt, 'image', imageUrl);
-          ws.send(buf);
+          wsRef.current.send(buf);
         }
 
       } else {
@@ -954,13 +1161,13 @@ export function Chat({ user, onLogout }: ChatProps) {
     // 当滚动到距离顶部 50px 以内时，触发加载历史消息
     if (scrollTop < 50) {
       const hasMore = hasMoreMessages[currentRoom.id];
-      if (hasMore && ws && ws.readyState === WebSocket.OPEN) {
+      if (hasMore && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         setIsLoadingHistory(true);
         const roomMessages = messages[currentRoom.id] || [];
         const firstMessageId = roomMessages.length > 0 ? roomMessages[0].id : '';
         
         const buf = encodeRequestRoomHistory(currentRoom.id, firstMessageId, 20);
-        ws.send(buf);
+        wsRef.current.send(buf);
       }
     }
   };
@@ -1062,6 +1269,27 @@ export function Chat({ user, onLogout }: ChatProps) {
 
       {/* Main Chat Area */}
       <main className="flex-1 flex flex-col bg-black relative">
+        {/* Network Status Banner */}
+        {connectionState === 'connecting' && (
+          <div className="absolute top-0 left-0 right-0 h-8 flex items-center justify-center bg-blue-500/10 border-b border-blue-500/20 z-50">
+            <Loader2 className="w-4 h-4 text-blue-400 animate-spin mr-2" />
+            <span className="text-xs text-blue-400">连接中...</span>
+          </div>
+        )}
+        {connectionState === 'disconnected' && (
+          <div className="absolute top-0 left-0 right-0 h-8 flex items-center justify-center bg-red-500/20 border-b border-red-500/30 z-50">
+            <span className="text-xs text-red-500 font-medium">未连接</span>
+          </div>
+        )}
+        {connectionState === 'disconnected' && reconnectAttempt >= 3 && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+            <div className="bg-zinc-900 border border-zinc-800 text-white px-6 py-4 rounded-xl shadow-2xl flex flex-col items-center">
+              <AlertCircle className="w-8 h-8 text-red-500 mb-2" />
+              <p className="font-medium">网络已断开，请检查网络设置</p>
+            </div>
+          </div>
+        )}
+
         {!currentRoom ? (
           <div className="h-full flex flex-col items-center justify-center text-zinc-500 space-y-6">
             <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-zinc-800 to-zinc-900 flex items-center justify-center shadow-2xl border border-white/5">
@@ -1072,7 +1300,7 @@ export function Chat({ user, onLogout }: ChatProps) {
         ) : (
           <>
             {/* Room Header */}
-            <header className="h-20 flex items-center px-8 bg-gradient-to-b from-black via-black/90 to-transparent sticky top-0 z-10">
+            <header className="h-20 flex items-center justify-between px-8 bg-gradient-to-b from-black via-black/90 to-transparent sticky top-0 z-10 pt-2">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-full bg-zinc-900 flex items-center justify-center text-zinc-400">
                   <Hash size={18} />
@@ -1083,6 +1311,15 @@ export function Chat({ user, onLogout }: ChatProps) {
                     <p className="text-xs text-zinc-500">{currentRoom.description}</p>
                   )}
                 </div>
+              </div>
+              {/* Network Health Indicator */}
+              <div className="flex items-center gap-2">
+                {connectionState === 'connected' && rtt !== null && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-900 border border-zinc-800" title={`Ping: ${rtt}ms`}>
+                    <div className={`w-2 h-2 rounded-full ${rtt < 100 ? 'bg-emerald-500' : rtt < 300 ? 'bg-yellow-500' : 'bg-red-500'}`}></div>
+                    <span className="text-[10px] text-zinc-500 font-mono">{rtt}ms</span>
+                  </div>
+                )}
               </div>
             </header>
 

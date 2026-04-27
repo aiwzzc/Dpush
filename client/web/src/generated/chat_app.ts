@@ -1,7 +1,7 @@
 import * as flatbuffers from 'flatbuffers';
 
 export enum MsgContentType { Unknown = 0, Text = 1, Image = 2, Audio = 3 }
-export enum AnyPayload { NONE = 0, HelloMessagePayload = 1, ClientMessagePayload = 2, ServerMessagePayload = 3, RequestRoomHistoryPayload = 4, RequestMessagePayload = 5, PullMissingMessagePayload = 6, MessageAckPayload = 7, BatchPullMessagePayload = 8, JoinSessionPayload = 9, SignalingFromClientPayload = 10, SignalingFromServerPayload = 11, SignalingFromClientJoinPayload = 12 }
+export enum AnyPayload { NONE = 0, HelloMessagePayload = 1, ClientMessagePayload = 2, ServerMessagePayload = 3, RequestRoomHistoryPayload = 4, RequestMessagePayload = 5, PullMissingMessagePayload = 6, MessageAckPayload = 7, BatchPullMessagePayload = 8, JoinSessionPayload = 9, SignalingFromClientPayload = 10, SignalingFromServerPayload = 11, SignalingFromClientJoinPayload = 12, PingPayload = 13, PongPayload = 14, BatchPullRoomHistoryPayload = 15 }
 
 export class BatchPullMessageItem {
   bb: flatbuffers.ByteBuffer | null = null;
@@ -267,6 +267,19 @@ export class ClientMessagePayload {
     this.bb = bb;
     return this;
   }
+  roomId(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+  clientMessageId(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 6);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+  messages(obj?: ClientMessageItem): ClientMessageItem | null {
+    const offset = this.bb!.__offset(this.bb_pos, 8);
+    return offset ? (obj || new ClientMessageItem()).__init(this.bb!.__indirect(this.bb_pos + offset), this.bb!) : null;
+  }
+
   static startClientMessagePayload(builder: flatbuffers.Builder) {
     builder.startObject(3);
   }
@@ -278,13 +291,6 @@ export class ClientMessagePayload {
   }
   static addMessages(builder: flatbuffers.Builder, messagesOffset: number) {
     builder.addFieldOffset(2, messagesOffset, 0);
-  }
-  static createMessagesVector(builder: flatbuffers.Builder, data: number[]): number {
-    builder.startVector(4, data.length, 4);
-    for (let i = data.length - 1; i >= 0; i--) {
-      builder.addOffset(data[i]);
-    }
-    return builder.endVector();
   }
   static endClientMessagePayload(builder: flatbuffers.Builder): number {
     return builder.endObject();
@@ -303,13 +309,9 @@ export class ServerMessagePayload {
     const offset = this.bb!.__offset(this.bb_pos, 4);
     return offset ? this.bb!.__string(this.bb_pos + offset) : null;
   }
-  messagesLength(): number {
+  messages(obj?: ServerMessageItem): ServerMessageItem | null {
     const offset = this.bb!.__offset(this.bb_pos, 6);
-    return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
-  }
-  messages(index: number, obj?: ServerMessageItem): ServerMessageItem | null {
-    const offset = this.bb!.__offset(this.bb_pos, 6);
-    return offset ? (obj || new ServerMessageItem()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+    return offset ? (obj || new ServerMessageItem()).__init(this.bb!.__indirect(this.bb_pos + offset), this.bb!) : null;
   }
 }
 
@@ -581,5 +583,105 @@ export class SignalingFromClientJoinPayload {
     SignalingFromClientJoinPayload.addRoomId(builder, roomIdOffset);
     SignalingFromClientJoinPayload.addRoomName(builder, roomNameOffset);
     return SignalingFromClientJoinPayload.endSignalingFromClientJoinPayload(builder);
+  }
+}
+
+export class PingPayload {
+  bb: flatbuffers.ByteBuffer | null = null;
+  bb_pos = 0;
+  __init(i: number, bb: flatbuffers.ByteBuffer): PingPayload {
+    this.bb_pos = i;
+    this.bb = bb;
+    return this;
+  }
+  ts(): bigint {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.readUint64(this.bb_pos + offset) : BigInt(0);
+  }
+  static startPingPayload(builder: flatbuffers.Builder) {
+    builder.startObject(1);
+  }
+  static addTs(builder: flatbuffers.Builder, ts: bigint) {
+    builder.addFieldInt64(0, ts, BigInt(0));
+  }
+  static endPingPayload(builder: flatbuffers.Builder): number {
+    return builder.endObject();
+  }
+  static createPingPayload(builder: flatbuffers.Builder, ts: bigint): number {
+    PingPayload.startPingPayload(builder);
+    PingPayload.addTs(builder, ts);
+    return PingPayload.endPingPayload(builder);
+  }
+}
+
+export class PongPayload {
+  bb: flatbuffers.ByteBuffer | null = null;
+  bb_pos = 0;
+  __init(i: number, bb: flatbuffers.ByteBuffer): PongPayload {
+    this.bb_pos = i;
+    this.bb = bb;
+    return this;
+  }
+  ts(): bigint {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.readUint64(this.bb_pos + offset) : BigInt(0);
+  }
+  static startPongPayload(builder: flatbuffers.Builder) {
+    builder.startObject(1);
+  }
+  static addTs(builder: flatbuffers.Builder, ts: bigint) {
+    builder.addFieldInt64(0, ts, BigInt(0));
+  }
+  static endPongPayload(builder: flatbuffers.Builder): number {
+    return builder.endObject();
+  }
+  static createPongPayload(builder: flatbuffers.Builder, ts: bigint): number {
+    PongPayload.startPongPayload(builder);
+    PongPayload.addTs(builder, ts);
+    return PongPayload.endPongPayload(builder);
+  }
+}
+
+export class ByteChunk {
+  bb: flatbuffers.ByteBuffer | null = null;
+  bb_pos = 0;
+  __init(i: number, bb: flatbuffers.ByteBuffer): ByteChunk {
+    this.bb_pos = i;
+    this.bb = bb;
+    return this;
+  }
+  data(index: number): number | null {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.readUint8(this.bb!.__vector(this.bb_pos + offset) + index) : 0;
+  }
+  dataLength(): number {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+  }
+  dataArray(): Uint8Array | null {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? new Uint8Array(this.bb!.bytes().buffer, this.bb!.bytes().byteOffset + this.bb!.__vector(this.bb_pos + offset), this.bb!.__vector_len(this.bb_pos + offset)) : null;
+  }
+}
+
+export class BatchPullRoomHistoryPayload {
+  bb: flatbuffers.ByteBuffer | null = null;
+  bb_pos = 0;
+  __init(i: number, bb: flatbuffers.ByteBuffer): BatchPullRoomHistoryPayload {
+    this.bb_pos = i;
+    this.bb = bb;
+    return this;
+  }
+  roomId(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+  historyChunks(index: number, obj?: ByteChunk): ByteChunk | null {
+    const offset = this.bb!.__offset(this.bb_pos, 6);
+    return offset ? (obj || new ByteChunk()).__init(this.bb!.__indirect(this.bb!.__vector(this.bb_pos + offset) + index * 4), this.bb!) : null;
+  }
+  historyChunksLength(): number {
+    const offset = this.bb!.__offset(this.bb_pos, 6);
+    return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
   }
 }

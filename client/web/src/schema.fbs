@@ -56,12 +56,12 @@ table RequestMessageItem {
 table ClientMessagePayload { 
     room_id: string;         
     client_message_id: string;
-    messages: [ClientMessageItem]; 
+    messages: ClientMessageItem; 
 } 
 
 table ServerMessagePayload { 
     room_id: string; 
-    messages: [ServerMessageItem]; 
+    messages: ServerMessageItem; 
 } 
 
 table PullMissingMessagePayload { 
@@ -124,6 +124,23 @@ table SignalingFromClientJoinPayload {
     room_name: string;
 }
 
+table PingPayload {
+    ts: uint64;
+}
+
+table PongPayload {
+    ts: uint64;
+}
+
+table ByteChunk {
+    data: [ubyte];
+}
+
+table batchPullRoomHistoryPayload {
+    room_id: string;
+    history_chunks: [ByteChunk];
+}
+
 union AnyPayload {
     HelloMessagePayload,
     ClientMessagePayload, 
@@ -136,7 +153,10 @@ union AnyPayload {
     JoinSessionPayload,
     SignalingFromClientPayload,
     SignalingFromServerPayload,
-    SignalingFromClientJoinPayload
+    SignalingFromClientJoinPayload,
+    PingPayload,
+    PongPayload,
+    batchPullRoomHistoryPayload
 } 
 
 table RootMessage { 
