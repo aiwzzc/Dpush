@@ -46,3 +46,6 @@ pnpm-debug.log*
 *.tsbuildinfo
 .env
 .env.*
+
+# Config
+.pem
