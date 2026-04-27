@@ -4,19 +4,42 @@ set(PROTO_SRC
 ${CMAKE_SOURCE_DIR}/proto/room.grpc.pb.cc 
 ${CMAKE_SOURCE_DIR}/proto/room.pb.cc)
 
-add_executable(RoomServer ${SRC} ${PROTO_SRC})
+add_executable(RoomServer ${SRC})
+
+# target_include_directories(RoomServer PUBLIC 
+# ${CMAKE_SOURCE_DIR}/flatbuffers 
+# ${CMAKE_SOURCE_DIR}/proto)
 
 target_include_directories(RoomServer PUBLIC 
-${CMAKE_SOURCE_DIR}/flatbuffers 
-${CMAKE_SOURCE_DIR}/proto)
+${CMAKE_BINARY_DIR}/fbs 
+${CMAKE_BINARY_DIR}/proto)
+
+find_package(utf8_range REQUIRED)
+
+set(GRPC_LIBS
+    grpc++
+    grpc
+    gpr
+    protobuf 
+    absl_synchronization 
+    absl_base
+)
 
 target_link_libraries(RoomServer 
 PRIVATE
-    grpc++ 
-    protobuf 
+    ${GRPC_LIBS} 
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    ZLIB::ZLIB
+    Threads::Threads
+
+    absl::synchronization
+    absl::base
+    absl::strings
+    utf8_range::utf8_range
+
     redis++ 
     hiredis 
     push_crypto 
-    gpr 
-    absl_synchronization
+    proto_gen
 )

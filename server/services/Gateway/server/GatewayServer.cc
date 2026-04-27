@@ -69,10 +69,10 @@ GatewayPubSubManager_(std::make_unique<GatewayPubSubManager>()), kafkaProducer_(
         });
 
         GatewayPubSubManager::RegisterLoop(loop);
-    });
+    });    
 }
 
-const char* GatewayServer::public_key = read_file("/home/zzc/linux_test/DistributedPush/server/GatewayServer/base/public.pem");
+const char* GatewayServer::public_key = read_file("/home/zzc/linux_test/DistributedPush/server/config/public.pem");
 
 GatewayServer::~GatewayServer() {
     if(this->poolthread_.joinable()) this->poolthread_.join();

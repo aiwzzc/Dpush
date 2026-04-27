@@ -15,15 +15,26 @@ ${CMAKE_SOURCE_DIR}/proto/gateway.pb.cc
 
 add_subdirectory(httpServer)
 
-add_executable(GatewayServer ${SRC} ${PROTO_SRC})
+add_executable(GatewayServer ${SRC})
 
 target_include_directories(GatewayServer PUBLIC 
 ${CMAKE_SOURCE_DIR}/libs 
-${CMAKE_SOURCE_DIR}/proto 
+${CMAKE_BINARY_DIR}/proto 
 ${CMAKE_SOURCE_DIR}/libs/tools 
 ${CMAKE_SOURCE_DIR}/libs/utils 
 ${CMAKE_CURRENT_SOURCE_DIR}/httpServer 
-${CMAKE_SOURCE_DIR}/flatbuffers)
+${CMAKE_BINARY_DIR}/fbs)
+
+find_package(utf8_range REQUIRED)
+
+set(GRPC_LIBS
+    grpc++
+    grpc
+    gpr
+    protobuf 
+    absl_synchronization 
+    absl_base
+)
 
 target_link_libraries(GatewayServer 
 PRIVATE
@@ -31,11 +42,18 @@ PRIVATE
     push_http 
     push_crypto 
     crypto 
-    grpc++ 
-    grpc 
-    gpr 
-    protobuf 
-    absl_synchronization 
+
+    ${GRPC_LIBS} 
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    ZLIB::ZLIB
+    Threads::Threads
+
+    absl::synchronization
+    absl::base
+    absl::strings
+    utf8_range::utf8_range
+
     redis++ 
     hiredis 
     rdkafka++ 
@@ -45,6 +63,9 @@ PRIVATE
     uring 
     push_utils 
     push_yyjson 
+    etcd-cpp-api 
+    cpprest 
+    proto_gen  
     ${JEMALLOC_LIBRARIES}
 )
 

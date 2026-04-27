@@ -163,7 +163,7 @@ static char* read_file(const char* filename) {
 }
 
 AuthService::AuthService(MySQLConnPool* pool, sw::redis::Redis* redis) : mysql_pool_(pool), redis_pool_(redis) {
-    this->private_key = read_file("/home/zzc/linux_test/DistributedPush/server/AuthServer/base/private.pem");
+    this->private_key = read_file("/home/zzc/linux_test/DistributedPush/server/config/private.pem");
 }
 AuthService::~AuthService() = default;
 

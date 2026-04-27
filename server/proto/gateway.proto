@@ -3,11 +3,13 @@ syntax = "proto3";
 package gateway;
 
 message sendSingleMsgRequest {
-    bytes message = 1;
+    int32 to_user_id = 1;
+    int32 user_id = 2;
+    bytes message = 3;
 }
 
 message sendSingleMsgResponse {
-
+    bool ok = 1;
 }
 
 service GatewayServer {
