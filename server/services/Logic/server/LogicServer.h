@@ -7,6 +7,7 @@
 #include "OrderedThreadPool.h"
 #include "LogicGrpcServer.h"
 #include "KafkaConsumer.h"
+#include "grpcClient.h"
 
 class LogicServer {
 
@@ -31,4 +32,5 @@ private:
     std::unique_ptr<sw::redis::Redis> redisPool_;
     std::unique_ptr<ComputeThreadPool> ComputeThreadPool_;
     std::unique_ptr<OrderedThreadPool> OrderedThreadPool_;
+    std::unique_ptr<grpcClient> grpc_client_;
 };

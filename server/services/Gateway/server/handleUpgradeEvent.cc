@@ -10,28 +10,47 @@
 
 #include <openssl/sha.h>
 #include <jwt.h>
+#include <charconv>
 
 extern thread_local std::unique_ptr<heartbeatManager> t_heartbeatManager_ptr;
+
+// std::string AnalysisCookie(const HttpRequest& req) {
+//     if(!req.headers().contains("Cookie")) return "";
+//     const std::string& cookieFields = *(req.getHeader("Cookie").value());
+
+//     std::stringstream ss(cookieFields);
+//     std::string item;
+//     std::string sid;
+
+//     while(std::getline(ss, item, ';')) {
+//         if(!item.empty() && item[0] == ' ') item.erase(0, 1);
+
+//         if(item.find("sid=") == 0) {
+//             sid = item.substr(4);
+
+//             break;
+//         }
+//     }
+
+//     return sid;
+// }
 
 std::string AnalysisCookie(const HttpRequest& req) {
     if(!req.headers().contains("Cookie")) return "";
     const std::string& cookieFields = *(req.getHeader("Cookie").value());
 
-    std::stringstream ss(cookieFields);
-    std::string item;
-    std::string sid;
+    std::string target = "sid=";
+    size_t pos = cookieFields.find(target);
+    if (pos == std::string::npos) return "";
 
-    while(std::getline(ss, item, ';')) {
-        if(!item.empty() && item[0] == ' ') item.erase(0, 1);
-
-        if(item.find("sid=") == 0) {
-            sid = item.substr(4);
-
-            break;
-        }
+    // 找到 sid= 之后的内容，直到遇到分号或字符串结束
+    size_t start = pos + target.length();
+    size_t end = cookieFields.find(';', start);
+    
+    if (end == std::string::npos) {
+        return cookieFields.substr(start);
     }
-
-    return sid;
+    return cookieFields.substr(start, end - start);
 }
 
 std::string HandleUpgradeResponse(const HttpRequest& req) {
@@ -70,11 +89,14 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
     if(*(req.getHeader("Upgrade").value()) == "websocket") {
         std::string cookie = AnalysisCookie(req);
 
+        std::cout << "DEBUG: Raw Cookie String: [" << cookie << "]" << std::endl; 
+
         jwt* decoded = nullptr;
         bool benchmark{false};
 
         if(jwt_decode(&decoded, cookie.c_str(), (unsigned char*)GatewayServer::public_key, 
         strlen(GatewayServer::public_key)) != 0) {
+            std::cout << "DEBUG: JWT Decode Failed! Cookie was: " << cookie << std::endl;
             benchmark = true;
             // sendbadResponse(conn);
 
@@ -91,7 +113,13 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
             username = uname_ptr ? uname_ptr : "";
             
         } else {
-            userid = std::stoi(req.path());
+            std::cout << req.path() << std::endl;
+
+            const std::string& req_path = req.path();
+
+            auto [p, ec] = std::from_chars(req_path.data(), req_path.data() + req_path.size(), userid);
+            if(ec != std::errc() || userid < 0) return;
+
             username = "user_" + std::to_string(userid - 32);
         }
         
@@ -102,6 +130,11 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
         auto wsContextPtr = std::make_shared<WebsocketConn>(conn);
         wsContextPtr->setUserid(userid);
         wsContextPtr->setUsername(username);
+
+        {
+            std::unique_lock<std::shared_mutex> lock(GatewayServer::user_Eventloop_mutex_);
+            GatewayServer::user_Eventloop_[wsContextPtr->userid()] = wsContextPtr->getLoop();
+        }
 
         client->rpcclearCursorsAsync(userid, [] () { return; });
 
@@ -146,6 +179,12 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
             if(!wsContextPtr->connected()) return;
 
             int32_t userid = wsContextPtr->userid();
+
+            {
+                std::unique_lock<std::shared_mutex> lock(GatewayServer::user_Eventloop_mutex_);
+                auto it = GatewayServer::user_Eventloop_.find(userid);
+                if(it != GatewayServer::user_Eventloop_.end()) GatewayServer::user_Eventloop_.erase(it);
+            }
 
 #if 0
             {
@@ -232,7 +271,12 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
                             kafka_key = std::move(target_id_str);
 
                         } else if(payload->chat_type() == ChatApp::ChatType::ChatType_Single) {
-                            long target_user_id = std::stoll(target_id_str);
+                            long target_user_id;
+                            auto [p, ec] = std::from_chars(target_id_str.data(), 
+                            target_id_str.data() + target_id_str.size(), target_user_id);
+
+                            if(ec != std::errc() || target_user_id < 0) return;
+
                             long own_user_id = wsContextPtr->userid();
 
                             long maxId = std::max(target_user_id, own_user_id);

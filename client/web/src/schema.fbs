@@ -7,6 +7,11 @@ enum MsgContentType : byte {
     Audio = 3 
 } 
 
+enum ChatType : byte {
+    Single = 1,
+    Group = 2
+}
+
 table User { 
     userid: long; 
     username: string; 
@@ -54,13 +59,15 @@ table RequestMessageItem {
 } 
 
 table ClientMessagePayload { 
-    room_id: string;         
+    chat_type: ChatType = Group;
+    target_id: string;         
     client_message_id: string;
     messages: ClientMessageItem; 
 } 
 
 table ServerMessagePayload { 
-    room_id: string; 
+    chat_type: ChatType = Group;
+    session_id: string; 
     messages: ServerMessageItem; 
 } 
 

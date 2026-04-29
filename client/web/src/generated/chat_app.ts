@@ -1,6 +1,7 @@
 import * as flatbuffers from 'flatbuffers';
 
 export enum MsgContentType { Unknown = 0, Text = 1, Image = 2, Audio = 3 }
+export enum ChatType { Single = 1, Group = 2 }
 export enum AnyPayload { NONE = 0, HelloMessagePayload = 1, ClientMessagePayload = 2, ServerMessagePayload = 3, RequestRoomHistoryPayload = 4, RequestMessagePayload = 5, PullMissingMessagePayload = 6, MessageAckPayload = 7, BatchPullMessagePayload = 8, JoinSessionPayload = 9, SignalingFromClientPayload = 10, SignalingFromServerPayload = 11, SignalingFromClientJoinPayload = 12, PingPayload = 13, PongPayload = 14, BatchPullRoomHistoryPayload = 15 }
 
 export class BatchPullMessageItem {
@@ -13,7 +14,7 @@ export class BatchPullMessageItem {
   }
   roomId(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 4);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   lastMessageId(): bigint {
     const offset = this.bb!.__offset(this.bb_pos, 6);
@@ -81,7 +82,7 @@ export class User {
   }
   username(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 6);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
 }
 
@@ -95,11 +96,11 @@ export class RoomMessageItem {
   }
   id(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 4);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   content(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 6);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   user(obj?: User): User | null {
     const offset = this.bb!.__offset(this.bb_pos, 8);
@@ -115,7 +116,11 @@ export class RoomMessageItem {
   }
   imageUrl(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 14);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
+  }
+  replyTo(): bigint {
+    const offset = this.bb!.__offset(this.bb_pos, 16);
+    return offset ? this.bb!.readInt64(this.bb_pos + offset) : BigInt(0);
   }
 }
 
@@ -133,11 +138,11 @@ export class RoomItem {
   }
   roomId(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 6);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   roomname(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 8);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   messages(index: number, obj?: RoomMessageItem): RoomMessageItem | null {
     const offset = this.bb!.__offset(this.bb_pos, 10);
@@ -159,7 +164,7 @@ export class ClientMessageItem {
   }
   content(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 4);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   msgType(): MsgContentType {
     const offset = this.bb!.__offset(this.bb_pos, 6);
@@ -167,11 +172,15 @@ export class ClientMessageItem {
   }
   imageUrl(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 8);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
+  }
+  replyTo(): bigint {
+    const offset = this.bb!.__offset(this.bb_pos, 10);
+    return offset ? this.bb!.readInt64(this.bb_pos + offset) : BigInt(0);
   }
 
   static startClientMessageItem(builder: flatbuffers.Builder) {
-    builder.startObject(3);
+    builder.startObject(4);
   }
   static addContent(builder: flatbuffers.Builder, contentOffset: number) {
     builder.addFieldOffset(0, contentOffset, 0);
@@ -181,6 +190,9 @@ export class ClientMessageItem {
   }
   static addImageUrl(builder: flatbuffers.Builder, imageUrlOffset: number) {
     builder.addFieldOffset(2, imageUrlOffset, 0);
+  }
+  static addReplyTo(builder: flatbuffers.Builder, replyTo: bigint) {
+    builder.addFieldInt64(3, replyTo, BigInt(0));
   }
   static endClientMessageItem(builder: flatbuffers.Builder): number {
     return builder.endObject();
@@ -197,7 +209,7 @@ export class ServerMessageItem {
   }
   clientMessageId(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 4);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   serverMessageId(): bigint {
     const offset = this.bb!.__offset(this.bb_pos, 6);
@@ -205,7 +217,7 @@ export class ServerMessageItem {
   }
   content(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 8);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   user(obj?: User): User | null {
     const offset = this.bb!.__offset(this.bb_pos, 10);
@@ -221,7 +233,11 @@ export class ServerMessageItem {
   }
   imageUrl(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 16);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
+  }
+  replyTo(): bigint {
+    const offset = this.bb!.__offset(this.bb_pos, 18);
+    return offset ? this.bb!.readInt64(this.bb_pos + offset) : BigInt(0);
   }
 }
 
@@ -235,11 +251,11 @@ export class RequestMessageItem {
   }
   id(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 4);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   content(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 6);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   user(obj?: User): User | null {
     const offset = this.bb!.__offset(this.bb_pos, 8);
@@ -255,7 +271,11 @@ export class RequestMessageItem {
   }
   imageUrl(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 14);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
+  }
+  replyTo(): bigint {
+    const offset = this.bb!.__offset(this.bb_pos, 16);
+    return offset ? this.bb!.readInt64(this.bb_pos + offset) : BigInt(0);
   }
 }
 
@@ -267,30 +287,37 @@ export class ClientMessagePayload {
     this.bb = bb;
     return this;
   }
-  roomId(): string | null {
+  chatType(): ChatType {
     const offset = this.bb!.__offset(this.bb_pos, 4);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.readInt8(this.bb_pos + offset) : ChatType.Group;
+  }
+  targetId(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 6);
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   clientMessageId(): string | null {
-    const offset = this.bb!.__offset(this.bb_pos, 6);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    const offset = this.bb!.__offset(this.bb_pos, 8);
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   messages(obj?: ClientMessageItem): ClientMessageItem | null {
-    const offset = this.bb!.__offset(this.bb_pos, 8);
+    const offset = this.bb!.__offset(this.bb_pos, 10);
     return offset ? (obj || new ClientMessageItem()).__init(this.bb!.__indirect(this.bb_pos + offset), this.bb!) : null;
   }
 
   static startClientMessagePayload(builder: flatbuffers.Builder) {
-    builder.startObject(3);
+    builder.startObject(4);
   }
-  static addRoomId(builder: flatbuffers.Builder, roomIdOffset: number) {
-    builder.addFieldOffset(0, roomIdOffset, 0);
+  static addChatType(builder: flatbuffers.Builder, chatType: ChatType) {
+    builder.addFieldInt8(0, chatType, ChatType.Group);
+  }
+  static addTargetId(builder: flatbuffers.Builder, targetIdOffset: number) {
+    builder.addFieldOffset(1, targetIdOffset, 0);
   }
   static addClientMessageId(builder: flatbuffers.Builder, clientMessageIdOffset: number) {
-    builder.addFieldOffset(1, clientMessageIdOffset, 0);
+    builder.addFieldOffset(2, clientMessageIdOffset, 0);
   }
   static addMessages(builder: flatbuffers.Builder, messagesOffset: number) {
-    builder.addFieldOffset(2, messagesOffset, 0);
+    builder.addFieldOffset(3, messagesOffset, 0);
   }
   static endClientMessagePayload(builder: flatbuffers.Builder): number {
     return builder.endObject();
@@ -305,12 +332,16 @@ export class ServerMessagePayload {
     this.bb = bb;
     return this;
   }
-  roomId(): string | null {
+  chatType(): ChatType {
     const offset = this.bb!.__offset(this.bb_pos, 4);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.readInt8(this.bb_pos + offset) : ChatType.Group;
+  }
+  sessionId(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 6);
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   messages(obj?: ServerMessageItem): ServerMessageItem | null {
-    const offset = this.bb!.__offset(this.bb_pos, 6);
+    const offset = this.bb!.__offset(this.bb_pos, 8);
     return offset ? (obj || new ServerMessageItem()).__init(this.bb!.__indirect(this.bb_pos + offset), this.bb!) : null;
   }
 }
@@ -379,11 +410,11 @@ export class RequestMessagePayload {
   }
   roomId(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 4);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   roomname(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 6);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   hasMoreMessages(): boolean {
     const offset = this.bb!.__offset(this.bb_pos, 8);
@@ -409,11 +440,11 @@ export class MessageAckPayload {
   }
   clientMessageId(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 4);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   status(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 6);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
 }
 
@@ -427,11 +458,11 @@ export class JoinSessionPayload {
   }
   roomId(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 4);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   roomname(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 6);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   messages(index: number, obj?: ServerMessageItem): ServerMessageItem | null {
     const offset = this.bb!.__offset(this.bb_pos, 8);
@@ -494,11 +525,11 @@ export class SignalingFromClientPayload {
   }
   action(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 4);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   roomId(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 6);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   static startSignalingFromClientPayload(builder: flatbuffers.Builder) {
     builder.startObject(2);
@@ -530,15 +561,15 @@ export class SignalingFromServerPayload {
   }
   action(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 4);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   roomId(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 6);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   status(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 8);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
 }
 
@@ -552,15 +583,15 @@ export class SignalingFromClientJoinPayload {
   }
   action(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 4);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   roomId(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 6);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   roomName(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 8);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   static startSignalingFromClientJoinPayload(builder: flatbuffers.Builder) {
     builder.startObject(3);
@@ -674,7 +705,7 @@ export class BatchPullRoomHistoryPayload {
   }
   roomId(): string | null {
     const offset = this.bb!.__offset(this.bb_pos, 4);
-    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+    return offset ? this.bb!.__string(this.bb_pos + offset) as string : null;
   }
   historyChunks(index: number, obj?: ByteChunk): ByteChunk | null {
     const offset = this.bb!.__offset(this.bb_pos, 6);

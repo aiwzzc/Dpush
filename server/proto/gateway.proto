@@ -3,9 +3,8 @@ syntax = "proto3";
 package gateway;
 
 message sendSingleMsgRequest {
-    int32 to_user_id = 1;
-    int32 user_id = 2;
-    bytes message = 3;
+    int32 user_id = 1;
+    bytes message = 2;
 }
 
 message sendSingleMsgResponse {

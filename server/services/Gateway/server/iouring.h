@@ -25,7 +25,7 @@ using muduo::net::TcpConnectionPtr;
 #define container_of(ptr, type, member) \
     ((type*)((char*)(ptr) - offsetof(type, member)))
 
-constexpr std::size_t kEntresLength          = 16384;
+constexpr std::size_t kEntresLength          = 4096;
 constexpr std::size_t kPendingWritePoolSize  = 100000;
 
 struct list_head {

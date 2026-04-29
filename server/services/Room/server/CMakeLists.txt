@@ -14,8 +14,6 @@ target_include_directories(RoomServer PUBLIC
 ${CMAKE_BINARY_DIR}/fbs 
 ${CMAKE_BINARY_DIR}/proto)
 
-find_package(utf8_range REQUIRED)
-
 set(GRPC_LIBS
     grpc++
     grpc
@@ -32,11 +30,6 @@ PRIVATE
     OpenSSL::Crypto
     ZLIB::ZLIB
     Threads::Threads
-
-    absl::synchronization
-    absl::base
-    absl::strings
-    utf8_range::utf8_range
 
     redis++ 
     hiredis 

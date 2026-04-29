@@ -11,6 +11,8 @@
 #include "OrderedThreadPool.h"
 #include "ComputeThreadPool.h"
 
+class grpcClient;
+
 class KafkaConsumer {
 
 public:
@@ -43,6 +45,8 @@ public:
     void start();
     void stop();
 
+    void setgrpcClient(grpcClient*);
+
 private:
     void process_message(RdKafka::Message* message);
 
@@ -53,4 +57,5 @@ private:
     sw::redis::Redis* redis_pool_;
     std::atomic<bool> running_;
     std::string lua_sha1_;
+    grpcClient* grpc_client_;
 };

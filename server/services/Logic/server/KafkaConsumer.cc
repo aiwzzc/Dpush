@@ -1,5 +1,7 @@
 #include "KafkaConsumer.h"
+#include "grpcClient.h"
 #include <iostream>
+#include <charconv>
 
 #include "coroutineTask.h"
 #include "types.h"
@@ -77,6 +79,9 @@ void KafkaConsumer::start_consuming() {
     }
 }
 
+void KafkaConsumer::setgrpcClient(grpcClient* cli) 
+{ this->grpc_client_ = cli; }
+
 void KafkaConsumer::start() {
     this->lua_sha1_ = this->redis_pool_->script_load(KafkaConsumer::lua_script);
 
@@ -95,7 +100,7 @@ static uint64_t getCurrentTimestamp() {
 void KafkaConsumer::stop() { this->running_.store(false); }
 
 void KafkaConsumer::process_message(RdKafka::Message* message) {
-    std::string roomid = message->key() ? *message->key() : "";
+    std::string kafka_key = message->key() ? *message->key() : "";
     auto rootMsg = ChatApp::GetRootMessage(static_cast<const char*>(message->payload()));
 
     auto payload = rootMsg->payload_as_ClientMessagePayload();
@@ -124,9 +129,7 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
         }
     }
 
-    // std::string session_id = chat_type == ChatApp::ChatType::ChatType_Group ? target_id : ;
-
-    std::vector<std::string> keys{"client_msg_set:{" + roomid + "}", "room_seq:{" + roomid + "}"};
+    std::vector<std::string> keys{"client_msg_set:{" + kafka_key + "}", "room_seq:{" + kafka_key + "}"};
     std::vector<std::string> args{std::string(clientMessageId.data(), clientMessageId.size()), "1"};
 
     std::vector<long long> returned_msgids;
@@ -144,7 +147,6 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
     thread_local flatbuffers::FlatBufferBuilder builder(4096);
     builder.Clear();
 
-    // std::vector<flatbuffers::Offset<ChatApp::ServerMessageItem>> serverMsgItemOffsets;
     auto username_flat = builder.CreateString(username);
 
     ChatApp::UserBuilder UserBuilder(builder);
@@ -164,10 +166,11 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
     serverMsgItemBuilder.add_timestamp(getCurrentTimestamp());
     auto serverMsgItemOffset = serverMsgItemBuilder.Finish();
 
-    auto room_id_flat = builder.CreateString(roomid);
+    auto session_id_flat = builder.CreateString(kafka_key);
 
     ChatApp::ServerMessagePayloadBuilder serverMsgPayloadBuilder(builder);
-    // serverMsgPayloadBuilder.add_room_id(room_id_flat);
+    serverMsgPayloadBuilder.add_chat_type(chat_type);
+    serverMsgPayloadBuilder.add_session_id(session_id_flat);
     serverMsgPayloadBuilder.add_messages(serverMsgItemOffset);
     auto serverMsgOffset = serverMsgPayloadBuilder.Finish();
 
@@ -190,11 +193,20 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
         long long max_seq_id = returned_msgids.back();
         std::string stream_id = std::to_string(max_seq_id) + "-0";
 
-        pipe.xadd("{" + roomid + "}", stream_id, stream_fields.begin(), stream_fields.end(), 500);
+        pipe.xadd("{" + kafka_key + "}", stream_id, stream_fields.begin(), stream_fields.end(), 500);
 
-        pipe.publish("room:" + roomid, fb_binary);
+        if(chat_type == ChatApp::ChatType::ChatType_Group) pipe.publish("room:" + kafka_key, fb_binary);
 
         pipe.exec();
+
+        if(chat_type == ChatApp::ChatType::ChatType_Single) {
+            this->grpc_client_->sendSingleMsgAsync(userid, std::string(fb_data, fb_size), [] () {});
+            int32_t target_user_id;
+            auto [p, ec] = std::from_chars(target_id.data(), target_id.data() + target_id.size(), target_user_id);
+            if(ec != std::errc() || target_user_id < 0) return;
+
+            this->grpc_client_->sendSingleMsgAsync(target_user_id, std::string(fb_data, fb_size), [] () {});
+        }
 
     } catch(const sw::redis::Error& e) {
         std::cerr << "Redis Pipeline 执行失败: " << e.what() << std::endl;

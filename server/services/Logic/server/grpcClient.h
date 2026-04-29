@@ -11,7 +11,7 @@ class grpcClient {
 public:
     grpcClient();
 
-    void sendSingleMsgAsync(const std::string&, const std::function<void()>&);
+    void sendSingleMsgAsync(int32_t userid, const std::string&, const std::function<void()>&);
 
 private:
     std::shared_ptr<grpc::Channel> GatewayChannel_;

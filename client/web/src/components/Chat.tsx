@@ -4,7 +4,7 @@ import { Send, Image as ImageIcon, LogOut, Sparkles, Loader2, Hash, Plus, X, Use
 import { GoogleGenAI } from '@google/genai';
 import * as flatbuffers from 'flatbuffers';
 import localforage from 'localforage';
-import { RootMessage, AnyPayload, ServerMessagePayload, RequestMessagePayload, MessageAckPayload, MsgContentType, SignalingFromServerPayload, PongPayload, BatchPullRoomHistoryPayload, ServerMessageItem } from '../generated/chat_app';
+import { RootMessage, AnyPayload, ServerMessagePayload, RequestMessagePayload, MessageAckPayload, MsgContentType, SignalingFromServerPayload, PongPayload, BatchPullRoomHistoryPayload, ServerMessageItem, ChatType } from '../generated/chat_app';
 import { encodeClientMessage, encodePullMissingMessages, encodeRequestRoomHistory, encodeBatchPullMessage, encodeSignalingFromClient, encodeSignalingFromClientJoin, encodePing } from '../utils/fb-helper';
 import { JoinSessionPayload } from '../generated/chat_app';
 
@@ -48,6 +48,8 @@ export function Chat({ user, onLogout }: ChatProps) {
   const [joinRoomError, setJoinRoomError] = useState('');
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [createRoomError, setCreateRoomError] = useState('');
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [selectedUser, setSelectedUser] = useState<{id: string, name: string} | null>(null);
 
   // 网络状态相关状态
   const [connectionState, setConnectionState] = useState<'connected' | 'connecting' | 'disconnected'>('connecting');
@@ -260,10 +262,12 @@ export function Chat({ user, onLogout }: ChatProps) {
                         clientMessageId: itemCheck.clientMessageId() || undefined,
                         serverMessageId: Number(itemCheck.serverMessageId()),
                         sender: itemCheck.user()?.username() || 'Unknown',
+                        senderId: Number(itemCheck.user()?.userid() || 0),
                         content: itemCheck.content() || '',
                         timestamp: parseTimestamp(Number(itemCheck.timestamp())),
                         type: itemCheck.msgType() === MsgContentType.Image ? 'image' : 'text',
                         imageUrl: itemCheck.imageUrl() || undefined,
+                        replyTo: Number(itemCheck.replyTo()) || undefined,
                         status: 'success'
                       });
                   } else {
@@ -294,10 +298,12 @@ export function Chat({ user, onLogout }: ChatProps) {
                                   clientMessageId: item.clientMessageId() || undefined,
                                   serverMessageId: Number(item.serverMessageId()),
                                   sender: senderInfo || 'Unknown',
+                                  senderId: Number(item.user()?.userid() || 0),
                                   content: contentInfo || '',
                                   timestamp: parseTimestamp(Number(item.timestamp())),
                                   type: item.msgType() === MsgContentType.Image ? 'image' : 'text',
                                   imageUrl: item.imageUrl() || undefined,
+                                  replyTo: Number(item.replyTo()) || undefined,
                                   status: 'success'
                                 });
                               }
@@ -340,7 +346,7 @@ export function Chat({ user, onLogout }: ChatProps) {
 
           if (payloadType === AnyPayload.ServerMessagePayload) {
             const payload = root.payload(new ServerMessagePayload()) as ServerMessagePayload;
-            const roomId = payload.roomId() || 'general';
+            const roomId = payload.sessionId() || 'general';
             
             let messagesToAdd: Message[] = [];
             let hasNewMessages = false;
@@ -351,10 +357,12 @@ export function Chat({ user, onLogout }: ChatProps) {
                 clientMessageId: msgRaw.clientMessageId,
                 serverMessageId: sMsgId,
                 sender: msgRaw.user?.username || 'Unknown',
+                senderId: msgRaw.user?.userid || undefined,
                 content: msgRaw.content,
                 timestamp: parseTimestamp(msgRaw.timestamp),
                 type: msgRaw.msgType || 'text',
-                imageUrl: msgRaw.imageUrl
+                imageUrl: msgRaw.imageUrl,
+                replyTo: msgRaw.replyTo
               };
               messagesToAdd.push(parsedMsg);
               hasNewMessages = true;
@@ -378,10 +386,11 @@ export function Chat({ user, onLogout }: ChatProps) {
                 clientMessageId: msg.clientMessageId(),
                 serverMessageId: Number(msg.serverMessageId()),
                 content: msg.content(),
-                user: { username: msg.user()?.username() || 'Unknown' },
+                user: { username: msg.user()?.username() || 'Unknown', userid: Number(msg.user()?.userid() || 0) },
                 timestamp: Number(msg.timestamp()),
                 msgType: msg.msgType() === MsgContentType.Image ? 'image' : 'text',
-                imageUrl: msg.imageUrl() || undefined
+                imageUrl: msg.imageUrl() || undefined,
+                replyTo: Number(msg.replyTo()) || undefined
               });
             }
 
@@ -438,6 +447,18 @@ export function Chat({ user, onLogout }: ChatProps) {
             });
 
             if (hasNewMessages) {
+              const roomExists = roomsRef.current.some(r => r.id === roomId);
+              if (!roomExists) {
+                const isSingleChat = payload.chatType() === ChatType.Single;
+                const newRoom: Room = {
+                  id: roomId,
+                  name: isSingleChat ? (messagesToAdd[0]?.sender || roomId) : roomId,
+                  chatType: payload.chatType(),
+                  description: isSingleChat ? 'Direct Message' : 'Group Chat'
+                };
+                setRooms(prev => [newRoom, ...prev]);
+              }
+
               setMessages(prev => {
                 const existingRoomMsgs = prev[roomId] || [];
                 const newRoomMsgs = [...existingRoomMsgs];
@@ -499,6 +520,7 @@ export function Chat({ user, onLogout }: ChatProps) {
                   id: msg.id() || Date.now().toString(),
                   clientMessageId: undefined, // RequestMessageItem schema doesn't have client_message_id
                   sender: msg.user()?.username() || 'Unknown',
+                  senderId: Number(msg.user()?.userid() || 0),
                   content: msg.content(),
                   timestamp: parseTimestamp(Number(msg.timestamp())),
                   type: msg.msgType() === MsgContentType.Image ? 'image' : 'text',
@@ -617,10 +639,12 @@ export function Chat({ user, onLogout }: ChatProps) {
                     clientMessageId: msg.clientMessageId() || undefined,
                     serverMessageId: Number(msg.serverMessageId()),
                     sender: msg.user()?.username() || 'Unknown',
+                    senderId: Number(msg.user()?.userid() || 0),
                     content: msg.content() || '',
                     timestamp: parseTimestamp(Number(msg.timestamp())),
                     type: msg.msgType() === MsgContentType.Image ? 'image' : 'text',
-                    imageUrl: msg.imageUrl() || undefined
+                    imageUrl: msg.imageUrl() || undefined,
+                    replyTo: Number(msg.replyTo()) || undefined
                   });
                }
             }
@@ -732,10 +756,12 @@ export function Chat({ user, onLogout }: ChatProps) {
     }
   }, [rooms, user.username, isLocalLoaded]);
 
-  const sendClientMessage = (roomId: string, content: string, clientMessageId: string, isRetry = false, msgType: 'text' | 'image' = 'text', imageUrl?: string) => {
+  const sendClientMessage = (roomId: string, content: string, clientMessageId: string, isRetry = false, msgType: 'text' | 'image' = 'text', imageUrl?: string, replyTo?: number) => {
     const sendToWs = () => {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        const buf = encodeClientMessage(roomId, clientMessageId, content, msgType, imageUrl);
+        const targetRoom = roomsRef.current.find(r => r.id === roomId);
+        const chatType = targetRoom?.chatType === ChatType.Single ? ChatType.Single : ChatType.Group;
+        const buf = encodeClientMessage(chatType, roomId, clientMessageId, content, msgType, imageUrl, replyTo);
         wsRef.current.send(buf);
       }
     };
@@ -783,6 +809,7 @@ export function Chat({ user, onLogout }: ChatProps) {
         id: clientMessageId,
         clientMessageId,
         sender: currentUser.username,
+        senderId: Number(currentUser.userid),
         content,
         timestamp: new Date(),
         type: 'text',
@@ -877,6 +904,27 @@ export function Chat({ user, onLogout }: ChatProps) {
     }
   };
 
+  const handleUserClick = (userinfo: {id: string | number, name: string}) => {
+    setSelectedUser({id: userinfo.id.toString(), name: userinfo.name});
+  };
+
+  const handleStartDirectMessage = (userinfo: {id: string, name: string}) => {
+    const existingRoom = rooms.find(r => r.id === userinfo.id && r.chatType === ChatType.Single);
+    if (existingRoom) {
+      setCurrentRoom(existingRoom);
+    } else {
+      const newRoom: Room = {
+        id: userinfo.id,
+        name: userinfo.name,
+        chatType: ChatType.Single,
+        description: 'Direct Message'
+      };
+      setRooms(prev => [newRoom, ...prev]);
+      setCurrentRoom(newRoom);
+    }
+    setSelectedUser(null);
+  };
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputValue.trim() || !currentRoom) return;
@@ -885,7 +933,8 @@ export function Chat({ user, onLogout }: ChatProps) {
     setInputValue('');
 
     const clientMessageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    sendClientMessage(currentRoom.id, messageContent, clientMessageId);
+    sendClientMessage(currentRoom.id, messageContent, clientMessageId, false, 'text', undefined, replyingTo?.serverMessageId);
+    setReplyingTo(null);
 
     // 检查是否 @ 了 AI
     if (messageContent.includes('@ai') || messageContent.includes('@AI')) {
@@ -954,7 +1003,9 @@ export function Chat({ user, onLogout }: ChatProps) {
       // 将 AI 的回复通过 WebSocket 广播给房间里的其他人
       const aiClientMessageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        const buf = encodeClientMessage(roomId, aiClientMessageId, aiReply, 'text');
+        const targetRoom = roomsRef.current.find(r => r.id === roomId);
+        const chatType = targetRoom?.chatType === ChatType.Single ? ChatType.Single : ChatType.Group;
+        const buf = encodeClientMessage(chatType, roomId, aiClientMessageId, aiReply, 'text');
         wsRef.current.send(buf);
       }
 
@@ -1058,6 +1109,7 @@ export function Chat({ user, onLogout }: ChatProps) {
     const generatingMessage: Message = {
       id: tempId,
       sender: currentUser.username,
+      senderId: Number(currentUser.userid),
       content: `[正在生成图片]: ${prompt}`,
       timestamp: new Date(),
       type: 'image',
@@ -1117,7 +1169,9 @@ export function Chat({ user, onLogout }: ChatProps) {
         // 生成成功后，也可以将图片消息通过 WebSocket 广播给其他人
         const imgClientMessageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          const buf = encodeClientMessage(currentRoom.id, imgClientMessageId, prompt, 'image', imageUrl);
+          const targetRoom = roomsRef.current.find(r => r.id === currentRoom.id);
+          const chatType = targetRoom?.chatType === ChatType.Single ? ChatType.Single : ChatType.Group;
+          const buf = encodeClientMessage(chatType, currentRoom.id, imgClientMessageId, prompt, 'image', imageUrl);
           wsRef.current.send(buf);
         }
 
@@ -1259,7 +1313,13 @@ export function Chat({ user, onLogout }: ChatProps) {
                     : 'text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-200'
                 }`}
               >
-                <Hash size={18} className={currentRoom?.id === room.id ? 'text-white' : 'text-zinc-500'} />
+                {room.chatType === ChatType.Single ? (
+                  <div className={`w-5 h-5 rounded flex items-center justify-center font-black text-xs ${currentRoom?.id === room.id ? 'bg-blue-600 text-white' : 'bg-zinc-800 text-zinc-500'}`}>
+                    {(room.name || room.id || '?').charAt(0).toUpperCase()}
+                  </div>
+                ) : (
+                  <Hash size={18} className={currentRoom?.id === room.id ? 'text-white' : 'text-zinc-500'} />
+                )}
                 <span className="truncate">{room.name}</span>
               </button>
             ))}
@@ -1302,9 +1362,15 @@ export function Chat({ user, onLogout }: ChatProps) {
             {/* Room Header */}
             <header className="h-20 flex items-center justify-between px-8 bg-gradient-to-b from-black via-black/90 to-transparent sticky top-0 z-10 pt-2">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-zinc-900 flex items-center justify-center text-zinc-400">
-                  <Hash size={18} />
-                </div>
+                {currentRoom.chatType === ChatType.Single ? (
+                   <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold">
+                     {(currentRoom.name || currentRoom.id || '?').charAt(0).toUpperCase()}
+                   </div>
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-zinc-900 flex items-center justify-center text-zinc-400">
+                    <Hash size={18} />
+                  </div>
+                )}
                 <div>
                   <h2 className="text-lg font-bold text-white">{currentRoom.name}</h2>
                   {currentRoom.description && (
@@ -1349,7 +1415,11 @@ export function Chat({ user, onLogout }: ChatProps) {
                 return (
                   <div key={msg.id} className={`flex gap-3 w-full ${isMe ? 'flex-row-reverse' : 'flex-row'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
                     {/* Avatar */}
-                    <div className={`w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center font-bold text-white shadow-sm ${isAI ? 'bg-blue-600' : 'bg-zinc-800'}`}>
+                    <div 
+                      onClick={() => !isMe && !isAI && handleUserClick({id: msg.senderId || msg.sender, name: msg.sender})}
+                      className={`w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center font-bold text-white shadow-sm ${isAI ? 'bg-blue-600' : 'bg-zinc-800'} ${!isMe && !isAI ? 'cursor-pointer hover:ring-2 hover:ring-white/20 transition-all' : ''}`}
+                      title={!isMe ? "Direct Message" : undefined}
+                    >
                       {isAI ? <Sparkles size={18} /> : msg.sender.charAt(0).toUpperCase()}
                     </div>
                     
@@ -1364,13 +1434,20 @@ export function Chat({ user, onLogout }: ChatProps) {
                         </span>
                       </div>
                       
-                      <div className={`relative px-4 py-3 text-base leading-relaxed shadow-sm ${
+                      <div 
+                        onContextMenu={(e) => { e.preventDefault(); setReplyingTo(msg); }}
+                        className={`relative px-4 py-3 text-base leading-relaxed shadow-sm group ${
                         isMe 
                           ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm' 
                           : isAI
                             ? 'bg-zinc-900 border border-blue-500/30 text-zinc-200 rounded-2xl rounded-tl-sm'
                             : 'bg-zinc-900 border border-zinc-800 text-zinc-200 rounded-2xl rounded-tl-sm'
                       }`}>
+                        {msg.replyTo && (
+                          <div className={`text-xs px-2 py-1 mb-2 rounded border-l-2 bg-black/20 ${isMe ? 'border-blue-300 text-blue-100' : 'border-zinc-500 text-zinc-400'}`}>
+                            Replied to message
+                          </div>
+                        )}
                         {msg.type === 'text' && (
                           <div className={`flex items-center gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                             {msg.isGenerating && <Loader2 size={14} className="animate-spin text-blue-400" />}
@@ -1464,6 +1541,17 @@ export function Chat({ user, onLogout }: ChatProps) {
         {/* Input Area */}
         <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black via-black/90 to-transparent pointer-events-none">
           <div className="max-w-4xl mx-auto pointer-events-auto">
+            {replyingTo && (
+              <div className="mb-2 mx-4 p-3 bg-zinc-900 border border-zinc-800 rounded-xl relative animate-in fade-in slide-in-from-bottom-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-blue-400">Replying to {replyingTo.sender}</span>
+                  <button onClick={() => setReplyingTo(null)} className="text-zinc-500 hover:text-zinc-300">
+                    <X size={16} />
+                  </button>
+                </div>
+                <p className="text-zinc-400 text-sm mt-1 truncate">{replyingTo.content}</p>
+              </div>
+            )}
             <form onSubmit={handleSendMessage} className="flex items-end gap-2 p-2 bg-zinc-900/80 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] shadow-2xl">
               <div className="flex-1 relative group">
                 <input
@@ -1564,6 +1652,34 @@ export function Chat({ user, onLogout }: ChatProps) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* User Profile Modal */}
+      {selectedUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" onClick={() => setSelectedUser(null)}>
+          <div className="bg-black border border-zinc-800 rounded-2xl p-8 w-full max-w-sm shadow-2xl flex flex-col items-center gap-6" onClick={(e) => e.stopPropagation()}>
+            <div className="w-24 h-24 rounded-full bg-blue-600 flex items-center justify-center text-4xl font-bold text-white shadow-lg">
+              {selectedUser.name.charAt(0).toUpperCase()}
+            </div>
+            
+            <div className="text-center">
+              <h3 className="text-2xl font-bold text-white mb-1">
+                {selectedUser.name}
+              </h3>
+              <p className="text-zinc-500 text-sm">Active Member</p>
+            </div>
+            
+            <div className="w-full pt-4">
+              <button
+                onClick={() => handleStartDirectMessage(selectedUser)}
+                className="w-full py-3 px-4 bg-white hover:bg-zinc-200 text-black rounded-full font-bold transition-colors flex items-center justify-center gap-2"
+              >
+                <MessageSquare size={18} />
+                Message
+              </button>
+            </div>
           </div>
         </div>
       )}

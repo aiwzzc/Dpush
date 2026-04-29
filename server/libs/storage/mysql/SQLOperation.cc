@@ -7,6 +7,7 @@ void SQLOperation::execute(MySQLConn* conn, MySQLConnPool* pool) {
     if(this->type_ == SQLOperation::SQLType::QUERY) {
         res = new AsyncResult(conn->query(this->sql_), this->cb_);
         res->cb_(res->res_);
+        pool->push_result(res);
 
     } else if(this->type_ == SQLOperation::SQLType::UPDATE) {
         int ret = conn->update(this->sql_);

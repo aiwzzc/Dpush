@@ -11,8 +11,6 @@ ${CMAKE_SOURCE_DIR}/libs
 ${CMAKE_BINARY_DIR}/proto
 )
 
-find_package(utf8_range REQUIRED)
-
 set(GRPC_LIBS
     grpc++
     grpc
@@ -33,11 +31,6 @@ PRIVATE
     OpenSSL::Crypto
     ZLIB::ZLIB
     Threads::Threads
-
-    absl::synchronization
-    absl::base
-    absl::strings
-    utf8_range::utf8_range
 
     uuid 
     redis++ 

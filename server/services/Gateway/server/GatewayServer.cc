@@ -50,6 +50,9 @@ extern thread_local std::unique_ptr<heartbeatManager> t_heartbeatManager_ptr;
 
 // }
 
+std::unordered_map<int32_t, muduo::net::EventLoop*> GatewayServer::user_Eventloop_{};
+std::shared_mutex GatewayServer::user_Eventloop_mutex_{};
+
 GatewayServer::GatewayServer() : HttpServer_(std::make_unique<HttpServer>(5003, 3, "HttpServer", 9)), 
 grpcClient_(std::make_shared<grpcClient>()),
 GatewayPubSubManager_(std::make_unique<GatewayPubSubManager>()), kafkaProducer_(std::make_shared<kafkaProducer>()) {

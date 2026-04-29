@@ -2,6 +2,9 @@
 
 #include <memory>
 #include <thread>
+#include <mutex>
+#include <unordered_map>
+#include <shared_mutex>
 
 #include "HttpServer.h"
 #include "HttpRequest.h"
@@ -10,6 +13,12 @@
 #include "grpcClient.h"
 #include "GatewayPubSubManager.h"
 #include "producer.h"
+
+namespace muduo {
+namespace net {
+    class EventLoop;
+};
+};
 
 class GatewayServer {
 
@@ -20,6 +29,8 @@ public:
     void start();
 
     static const char* public_key;
+    static std::unordered_map<int32_t, muduo::net::EventLoop*> user_Eventloop_;
+    static std::shared_mutex user_Eventloop_mutex_;
 
 private:
     static constexpr long long MAX_CONN_SIZE = 100000;

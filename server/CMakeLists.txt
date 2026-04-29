@@ -66,10 +66,30 @@ PUBLIC
     gRPC::grpc++
     gRPC::grpc
     protobuf::libprotobuf
-
-    absl::log_internal_check_op
+    
+    # 1. Protobuf 必需的 utf8 库
+    utf8_range
+    utf8_validity
+    
+    # 2. Abseil 核心组件（补全了 conditions）
+    absl::log_internal_conditions      # <--- 【关键修复：解决 ShouldLog 报错】
     absl::log_internal_message
+    absl::log_internal_check_op
+    absl::log_internal_nullguard
     absl::raw_logging_internal
+    absl::log_internal_proto
+    
+    # 3. 数据处理组件
+    absl::cord
+    absl::cord_internal
+    absl::cordz_info
+    absl::cordz_handle
+    absl::cordz_functions
+    
+    # 4. 基础组件
+    absl::synchronization
+    absl::base
+    absl::strings
 )
 
 set(FLATBUFFER_DIR ${CMAKE_SOURCE_DIR}/flatbuffers)

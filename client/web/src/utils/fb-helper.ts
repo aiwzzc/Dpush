@@ -5,6 +5,7 @@ import {
   ClientMessagePayload,
   ClientMessageItem,
   MsgContentType,
+  ChatType,
   PullMissingMessagePayload,
   RequestRoomHistoryPayload,
   BatchPullMessagePayload,
@@ -14,10 +15,10 @@ import {
   PingPayload
 } from '../generated/chat_app';
 
-export function encodeClientMessage(roomId: string, clientMessageId: string, content: string, msgType: 'text' | 'image' = 'text', imageUrl?: string): Uint8Array {
+export function encodeClientMessage(chatType: number, targetId: string, clientMessageId: string, content: string, msgType: 'text' | 'image' = 'text', imageUrl?: string, replyTo?: number): Uint8Array {
   const builder = new flatbuffers.Builder(1024);
 
-  const roomIdOffset = builder.createString(roomId);
+  const targetIdOffset = builder.createString(targetId);
   const clientIdOffset = builder.createString(clientMessageId);
   const contentOffset = builder.createString(content);
   const imageUrlOffset = imageUrl ? builder.createString(imageUrl) : 0;
@@ -28,10 +29,14 @@ export function encodeClientMessage(roomId: string, clientMessageId: string, con
   if (imageUrlOffset) {
     ClientMessageItem.addImageUrl(builder, imageUrlOffset);
   }
+  if (replyTo) {
+    ClientMessageItem.addReplyTo(builder, BigInt(replyTo));
+  }
   const itemOffset = ClientMessageItem.endClientMessageItem(builder);
 
   ClientMessagePayload.startClientMessagePayload(builder);
-  ClientMessagePayload.addRoomId(builder, roomIdOffset);
+  ClientMessagePayload.addChatType(builder, chatType);
+  ClientMessagePayload.addTargetId(builder, targetIdOffset);
   ClientMessagePayload.addClientMessageId(builder, clientIdOffset);
   ClientMessagePayload.addMessages(builder, itemOffset);
   const payloadOffset = ClientMessagePayload.endClientMessagePayload(builder);

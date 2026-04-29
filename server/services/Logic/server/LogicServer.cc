@@ -34,6 +34,8 @@ LogicServer::LogicServer() {
 
     this->KafkaConsumer_ = std::make_unique<KafkaConsumer>(LogicServer::brokers, LogicServer::groupId, topics, 
     this->OrderedThreadPool_.get(), this->ComputeThreadPool_.get(), this->redisPool_.get());
+
+    this->grpc_client_ = std::make_unique<grpcClient>();
 }
 
 LogicServer::~LogicServer() { this->KafkaConsumer_->stop(); }
@@ -42,6 +44,7 @@ void LogicServer::start() {
     this->ComputeThreadPool_->start();
     this->OrderedThreadPool_->start();
 
+    this->KafkaConsumer_->setgrpcClient(this->grpc_client_.get());
     this->KafkaConsumer_->start();
 
     this->LogicGrpcServer_->Wait();
