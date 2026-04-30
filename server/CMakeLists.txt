@@ -72,7 +72,7 @@ PUBLIC
     utf8_validity
     
     # 2. Abseil 核心组件（补全了 conditions）
-    absl::log_internal_conditions      # <--- 【关键修复：解决 ShouldLog 报错】
+    absl::log_internal_conditions 
     absl::log_internal_message
     absl::log_internal_check_op
     absl::log_internal_nullguard

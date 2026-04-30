@@ -112,7 +112,7 @@ void HttpServer::onConnection(const TcpConnectionPtr& conn) {
 
 void HttpServer::onMessage(const TcpConnectionPtr& conn, muduo::net::Buffer* buf) {
     if(conn->disconnected()) return;
-std::cout << std::string_view(buf->peek(), buf->readableBytes()) << std::endl;
+// std::cout << std::string_view(buf->peek(), buf->readableBytes()) << std::endl;
     HttpContext* context = std::any_cast<HttpContext>(conn->getMutableContext());
     if(context == nullptr) return;
 

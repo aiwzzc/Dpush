@@ -3,6 +3,12 @@
 #include <memory>
 #include <queue>
 #include <coroutine>
+#include <thread>
+#include <mutex>
+#include <vector>
+
+#include <boost/asio.hpp>
+#include <boost/asio/steady_timer.hpp>
 
 #include "AsyncMysqlConn.h"
 
@@ -11,42 +17,16 @@ class asyncMysqlConnPool {
 public:
     using asyncMysqlConnPtr = std::shared_ptr<asyncMysqlConn>;
 
-    struct AcquireAwaiter {
+    asyncMysqlConnPool(boost::asio::io_context& ioc, int max_conn);
+    ~asyncMysqlConnPool();
 
-        asyncMysqlConnPool* pool_;
-        asyncMysqlConnPtr result_conn_;
-
-        bool await_ready() const noexcept {
-            if(!this->pool_->free_conns_.empty() || 
-            this->pool_->active_connections_ < this->pool_->max_connections_) return true;
-
-            return false;
-        }
-
-        void await_suspend(std::coroutine_handle<> handle) {
-            this->pool_->wait_queue_.push({handle, &this->result_conn_});
-        }
-
-        asyncMysqlConnPtr await_resume() {
-            if(this->result_conn_) return this->result_conn_;
-
-            if(!this->pool_->free_conns_.empty()) {
-                this->result_conn_ = this->pool_->free_conns_.front();
-                this->pool_->free_conns_.pop();
-
-                return this->result_conn_;
-            }
-
-            this->pool_->active_connections_++;
-            return std::make_shared<asyncMysqlConn>();
-        }
-    };
-
-    AcquireAwaiter Acquire();
+    boost::asio::awaitable<asyncMysqlConnPtr> Acquire();
     void Release(asyncMysqlConnPtr conn);
+    boost::asio::io_context* get_ioc() const;
 
 private:
-    friend AcquireAwaiter;
+
+    boost::asio::io_context& ioc_;
 
     int max_connections_;
     int active_connections_;
@@ -54,7 +34,7 @@ private:
     std::queue<asyncMysqlConnPtr> free_conns_;
 
     struct Waiter {
-        std::coroutine_handle<> handle_;
+        boost::asio::steady_timer* timer_;
         asyncMysqlConnPtr* result_ptr_;
     };
 

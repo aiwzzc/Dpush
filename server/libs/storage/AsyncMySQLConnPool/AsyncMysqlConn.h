@@ -1,17 +1,27 @@
 #pragma once
 
-#include <boost/mysql.hpp>
 #include <memory>
+#include <boost/asio.hpp>
+#include <boost/mysql.hpp>
+#include <string>
 
 class asyncMysqlConnPool;
 
 class asyncMysqlConn {
 
 public:
-    void ping();
+    asyncMysqlConn(asyncMysqlConnPool* pool);
+
+    boost::asio::awaitable<void> async_open();
+    boost::asio::awaitable<void> ping();
+    boost::asio::awaitable<boost::mysql::results> acquire(const std::string& sql);
+    boost::asio::awaitable<boost::mysql::results> execute(const std::string& sql);
+
+private:
+    asyncMysqlConnPool* pool_;
+    std::shared_ptr<boost::mysql::tcp_connection> conn_;
 
 };
-
 
 class mysqlConnGuard {
 

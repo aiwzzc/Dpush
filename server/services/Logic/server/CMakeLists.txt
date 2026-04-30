@@ -42,10 +42,9 @@ PRIVATE
     redis++ 
     hiredis 
     push_crypto 
-    mysqlcppconn
-    push_mysqlpool
     rdkafka++ 
     rdkafka 
     push_utils 
     proto_gen
+    push_asyncmysqlpool
 )

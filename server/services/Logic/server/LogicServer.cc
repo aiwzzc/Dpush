@@ -1,8 +1,7 @@
 #include "LogicServer.h"
 
 LogicServer::LogicServer() {
-    this->MySQLConnPool_.reset(MySQLConnPool::getinstance(LogicServer::dbname));
-    this->MySQLConnPool_->initpool(LogicServer::url, LogicServer::pool_size);
+    this->mysql_cluster_ = std::make_unique<asyncMysqlCluster>(4, 10);
 
     sw::redis::ConnectionOptions connection_options;
     connection_options.host = "127.0.0.1";
@@ -17,7 +16,7 @@ LogicServer::LogicServer() {
     this->ComputeThreadPool_ = std::make_unique<ComputeThreadPool>(6);
     this->OrderedThreadPool_ = std::make_unique<OrderedThreadPool>(6);
 
-    this->LogicGrpcService_ = std::make_unique<LogicGrpcServer>(this->MySQLConnPool_.get(), 
+    this->LogicGrpcService_ = std::make_unique<LogicGrpcServer>(this->mysql_cluster_.get(), 
     this->redisPool_.get(), this->ComputeThreadPool_.get());
 
     ServerBuilder builder;
@@ -43,6 +42,8 @@ LogicServer::~LogicServer() { this->KafkaConsumer_->stop(); }
 void LogicServer::start() {
     this->ComputeThreadPool_->start();
     this->OrderedThreadPool_->start();
+
+    this->mysql_cluster_->start();
 
     this->KafkaConsumer_->setgrpcClient(this->grpc_client_.get());
     this->KafkaConsumer_->start();

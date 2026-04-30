@@ -89,14 +89,14 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
     if(*(req.getHeader("Upgrade").value()) == "websocket") {
         std::string cookie = AnalysisCookie(req);
 
-        std::cout << "DEBUG: Raw Cookie String: [" << cookie << "]" << std::endl; 
+        // std::cout << "DEBUG: Raw Cookie String: [" << cookie << "]" << std::endl; 
 
         jwt* decoded = nullptr;
         bool benchmark{false};
 
         if(jwt_decode(&decoded, cookie.c_str(), (unsigned char*)GatewayServer::public_key, 
         strlen(GatewayServer::public_key)) != 0) {
-            std::cout << "DEBUG: JWT Decode Failed! Cookie was: " << cookie << std::endl;
+            // std::cout << "DEBUG: JWT Decode Failed! Cookie was: " << cookie << std::endl;
             benchmark = true;
             // sendbadResponse(conn);
 
@@ -113,7 +113,7 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
             username = uname_ptr ? uname_ptr : "";
             
         } else {
-            std::cout << req.path() << std::endl;
+            // std::cout << req.path() << std::endl;
 
             const std::string& req_path = req.path();
 

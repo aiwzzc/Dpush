@@ -6,7 +6,13 @@
 #include "chat_generated.h"
 #include "SnowflakeIdWorker.h"
 
+#include "storage/AsyncMySQLConnPool/AsyncMysqlConnPool.h"
+#include "storage/AsyncMySQLConnPool/AsyncMysqlConn.h"
+#include "storage/AsyncMySQLConnPool/AsioBridge.h"
+#include "storage/AsyncMySQLConnPool/AsyncMysqlCluster.h"
+
 #include <memory>
+#include <boost/asio.hpp>
 
 namespace {
 
@@ -20,47 +26,10 @@ std::string FormatString(const std::string &format, Args... args) {
 
 };
 
-LogicGrpcServer::LogicGrpcServer(MySQLConnPool* mysql, sw::redis::Redis* redis, ComputeThreadPool* thread) : 
-mysql_pool_(mysql), redis_pool_(redis), thread_pool_(thread) {}
+LogicGrpcServer::LogicGrpcServer(asyncMysqlCluster* asyncmysql, 
+sw::redis::Redis* redis, ComputeThreadPool* thread) : 
+mysql_pool_(asyncmysql), redis_pool_(redis), thread_pool_(thread) {}
 LogicGrpcServer::~LogicGrpcServer() = default;
-
-struct QueryAwaiter {
-
-    MySQLConnPool* pool_;
-    std::string sql_;
-    SQLOperation::SQLType type_;
-    SQLResult result_;
-
-    bool await_ready() const noexcept { return false; }
-    void await_suspend(std::coroutine_handle<> handle) {
-        this->pool_->query(this->sql_, this->type_, [this, handle] (SQLResult res) {
-            if(type_ == SQLOperation::SQLType::QUERY) this->result_ = res;
-
-            handle.resume();
-        });
-    }
-
-    SQLResult await_resume() { return this->result_; }
-};
-
-struct UpdateAwaiter {
-
-    MySQLConnPool* pool_;
-    std::string sql_;
-    SQLOperation::SQLType type_;
-    std::string status_;
-
-    bool await_ready() const noexcept { return false; }
-    void await_suspend(std::coroutine_handle<> handle) {
-        this->pool_->query(this->sql_, this->type_, [this, handle] (SQLResult res) {
-            if(!res.empty() && !res[0].empty()) this->status_.assign(res[0][0]);
-
-            handle.resume();
-        });
-    }
-
-    std::string await_resume() { return this->status_; }
-};
 
 static uint64_t getCurrentTimestamp() {
     auto now = std::chrono::system_clock::time_point::clock::now();
@@ -261,14 +230,6 @@ struct addSessionToRedisAwaiter {
 
     void await_resume() {}
 };
-
-QueryAwaiter async_query_for_coro(MySQLConnPool* pool, const std::string& sql, SQLOperation::SQLType type) {
-    return QueryAwaiter{pool, sql, type, {}};
-}
-
-UpdateAwaiter async_update_for_coro(MySQLConnPool* pool, const std::string& sql, SQLOperation::SQLType type) {
-    return UpdateAwaiter{pool, sql, type, ""};
-}
 
 clearCursorsAwaiter async_clearCursors_for_coro(sw::redis::Redis* redis, ComputeThreadPool* threadpool, int32_t& userid) {
     return clearCursorsAwaiter{redis, threadpool, userid};
@@ -515,9 +476,17 @@ DetachedTask LogicGrpcServer::DojoinSession(grpc::ServerUnaryReactor* reactor, c
 
     // mysql get room_id
     std::string sql = FormatString("select room_id from room_info where room_name = '%s'", roomname.c_str());
-    SQLResult result = co_await async_query_for_coro(this->mysql_pool_, sql, SQLOperation::SQLType::QUERY);
 
-    if(result.empty()) {
+    asyncMysqlConnPool* pool = this->mysql_pool_->get_next_pool();
+
+    auto conn = co_await AwaitAsio(pool->get_ioc(), pool->Acquire());
+    mysqlConnGuard guard(pool, conn);
+
+    co_await AwaitAsio(pool->get_ioc(), guard->execute("begin"));
+    auto result = co_await AwaitAsio(pool->get_ioc(), guard->execute(sql));
+    auto rows = result.rows();
+
+    if(rows.empty()) {
         response->set_code(-1);
         response->set_error_msg("Session not exist");
         response->set_roomid(-1);
@@ -526,8 +495,8 @@ DetachedTask LogicGrpcServer::DojoinSession(grpc::ServerUnaryReactor* reactor, c
         co_return;
     }
 
-    // get flatbuffer to Gateway and redis publish
-    std::string room_id = result[0][0];
+    auto row = rows.front();
+    int64_t room_id = row[0].as_int64();
     int64_t msg_id = 0;
 
     std::stringstream ss;
@@ -536,23 +505,14 @@ DetachedTask LogicGrpcServer::DojoinSession(grpc::ServerUnaryReactor* reactor, c
         << userid << ", "
         << 1 << ")";
 
-    std::string status = co_await async_update_for_coro(this->mysql_pool_, ss.str(), SQLOperation::SQLType::UPDATE);
-    if(status == "-1") {
-        response->set_code(-1);
-        response->set_error_msg("already add");
-        response->set_roomid(-1);
+    auto ok = co_await AwaitAsio(pool->get_ioc(), guard->execute(ss.str()));
+    co_await AwaitAsio(pool->get_ioc(), guard->execute("commit"));
 
-        reactor->Finish(grpc::Status::OK);
-        co_return;
-    }
-
-    int64_t room_id_ = std::stol(room_id);
-    co_await async_AddSessionToRedis_for_coro(this->redis_pool_, this->thread_pool_, userid, room_id_);
+    co_await async_AddSessionToRedis_for_coro(this->redis_pool_, this->thread_pool_, userid, room_id);
 
     response->set_code(0);
     response->set_error_msg("");
-    int64_t roomid = std::stol(room_id);
-    response->set_roomid(roomid);
+    response->set_roomid(room_id);
 
     reactor->Finish(grpc::Status::OK);
 }
@@ -657,29 +617,21 @@ DetachedTask LogicGrpcServer::DocreateSession(grpc::ServerUnaryReactor* reactor,
        << room_name << "', "
        << userid << ")";
 
-    std::string status = co_await async_update_for_coro(this->mysql_pool_, ss.str(), SQLOperation::SQLType::UPDATE);
-    if(status == "-1") {
-        response->set_code(-1);
-        response->set_error_msg("The room already exists");
-
-        reactor->Finish(grpc::Status::OK);
-        co_return;
-    }
-
     std::stringstream ss2;
     ss2 << "INSERT INTO room_member (room_id, user_id, role) VALUES ("
         << new_room_id << ", "
         << userid << ", "
         << 3 << ")";
 
-    status = co_await async_update_for_coro(this->mysql_pool_, ss2.str(), SQLOperation::SQLType::UPDATE);
-    if(status == "-1") {
-        response->set_code(-2);
-        response->set_error_msg("Unknow Error");
+    asyncMysqlConnPool* pool = this->mysql_pool_->get_next_pool();
 
-        reactor->Finish(grpc::Status::OK);
-        co_return;
-    }
+    auto conn = co_await AwaitAsio(pool->get_ioc(), pool->Acquire());
+    mysqlConnGuard guard(pool, conn);
+
+    co_await AwaitAsio(pool->get_ioc(), guard->execute("begin"));
+    auto ok1 = co_await AwaitAsio(pool->get_ioc(), guard->execute(ss.str()));
+    auto ok2 = co_await AwaitAsio(pool->get_ioc(), guard->execute(ss2.str()));
+    co_await AwaitAsio(pool->get_ioc(), guard->execute("commit"));
 
     co_await async_AddSessionToRedis_for_coro(this->redis_pool_, this->thread_pool_, userid, new_room_id);
 
