@@ -33,7 +33,7 @@ set(GRPC_LIBS
 
 target_link_libraries(LogicServer 
 PRIVATE
-    ${GRPC_LIBS} 
+    # ${GRPC_LIBS} 
     OpenSSL::SSL
     OpenSSL::Crypto
     ZLIB::ZLIB
@@ -47,4 +47,6 @@ PRIVATE
     push_utils 
     proto_gen
     push_asyncmysqlpool
+    etcd-cpp-api
+    cpprest
 )

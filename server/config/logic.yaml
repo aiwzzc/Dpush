@@ -1,0 +1,6 @@
+service:
+  name: logic
+  instance_id: log-1
+  host: 192.168.183.130
+  port: 5008
+  weight: 1

@@ -6,16 +6,17 @@
 #include <memory>
 #include <functional>
 
+class LogicDiscovery;
+
 class grpcClient {
 
 public:
-    grpcClient();
+    grpcClient(LogicDiscovery* discover);
 
-    void sendSingleMsgAsync(int32_t userid, const std::string&, const std::function<void()>&);
+    void sendSingleMsgAsync(const std::string&, int32_t userid, const std::string&, 
+        const std::function<void()>&);
 
 private:
-    std::shared_ptr<grpc::Channel> GatewayChannel_;
-    std::unique_ptr<gateway::GatewayServer::Stub> GatewayStub_;
-
+    LogicDiscovery* discover_;
 
 };

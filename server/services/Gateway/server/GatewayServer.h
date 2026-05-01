@@ -13,6 +13,8 @@
 #include "grpcClient.h"
 #include "GatewayPubSubManager.h"
 #include "producer.h"
+#include "grpcServer.h"
+#include "GatewayRegister.h"
 
 namespace muduo {
 namespace net {
@@ -40,4 +42,7 @@ private:
     std::unique_ptr<GatewayPubSubManager> GatewayPubSubManager_;
     std::shared_ptr<kafkaProducer> kafkaProducer_;
     std::thread poolthread_;
+
+    std::unique_ptr<GatewayGrpcServer> grpcServer_;
+    std::unique_ptr<GatewayRegister> register_;
 };

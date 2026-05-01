@@ -72,13 +72,22 @@ GatewayPubSubManager_(std::make_unique<GatewayPubSubManager>()), kafkaProducer_(
         });
 
         GatewayPubSubManager::RegisterLoop(loop);
-    });    
+    });
+
+    this->grpcServer_ = std::make_unique<GatewayGrpcServer>();
+
+    grpc::ServerBuilder builder;
+    builder.AddListeningPort("0.0.0.0:5005", grpc::InsecureServerCredentials());
+    builder.RegisterService(this->grpcServer_.get());
+
+    this->register_ = std::make_unique<GatewayRegister>("127.0.0.1:2379", "192.168.183.130:5005");
 }
 
 const char* GatewayServer::public_key = read_file("/home/zzc/linux_test/DistributedPush/server/config/public.pem");
 
 GatewayServer::~GatewayServer() {
     if(this->poolthread_.joinable()) this->poolthread_.join();
+    this->register_->stop();
 }
 
 void GatewayServer::start() {
@@ -88,5 +97,6 @@ void GatewayServer::start() {
         }
     });
 
+    this->register_->start();
     this->HttpServer_->start();
 }

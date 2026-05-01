@@ -195,17 +195,42 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
 
         pipe.xadd("{" + kafka_key + "}", stream_id, stream_fields.begin(), stream_fields.end(), 500);
 
-        if(chat_type == ChatApp::ChatType::ChatType_Group) pipe.publish("room:" + kafka_key, fb_binary);
+        if(chat_type == ChatApp::ChatType::ChatType_Group) {
+            pipe.publish("room:" + kafka_key, fb_binary);
 
-        pipe.exec();
+            pipe.exec();
 
-        if(chat_type == ChatApp::ChatType::ChatType_Single) {
-            this->grpc_client_->sendSingleMsgAsync(userid, std::string(fb_data, fb_size), [] () {});
+        } else if(chat_type == ChatApp::ChatType::ChatType_Single) {
+
+            std::string sender_route_key = "{route:uid:" + std::to_string(userid) + "}";
+            std::string target_route_key = "{route:uid:" + std::string(target_id) + "}";
+
+            pipe.get(sender_route_key);
+            pipe.get(target_route_key);
+            auto replies = pipe.exec();
+
+            std::string sender_gateway_addr;
+            std::string target_gateway_addr;
+
+            if(replies.get<sw::redis::OptionalString>(1)) {
+                sender_gateway_addr = *replies.get<sw::redis::OptionalString>(1);
+            }
+
+            if(replies.get<sw::redis::OptionalString>(2)) {
+                target_gateway_addr = *replies.get<sw::redis::OptionalString>(2);
+            }
+
             int32_t target_user_id;
             auto [p, ec] = std::from_chars(target_id.data(), target_id.data() + target_id.size(), target_user_id);
             if(ec != std::errc() || target_user_id < 0) return;
 
-            this->grpc_client_->sendSingleMsgAsync(target_user_id, std::string(fb_data, fb_size), [] () {});
+            if(!sender_gateway_addr.empty()) {
+                this->grpc_client_->sendSingleMsgAsync(sender_gateway_addr, userid, std::string(fb_data, fb_size), [] () {});
+            }
+            
+            if(!target_gateway_addr.empty()) {
+                this->grpc_client_->sendSingleMsgAsync(target_gateway_addr, target_user_id, std::string(fb_data, fb_size), [] () {});
+            }
         }
 
     } catch(const sw::redis::Error& e) {

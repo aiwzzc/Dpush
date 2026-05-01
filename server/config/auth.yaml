@@ -1,0 +1,6 @@
+service:
+  name: auth
+  instance_id: auth-1
+  host: 192.168.183.130
+  port: 5006
+  weight: 1

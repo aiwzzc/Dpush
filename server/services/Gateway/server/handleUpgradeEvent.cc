@@ -138,7 +138,8 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
 
         client->rpcclearCursorsAsync(userid, [] () { return; });
 
-        client->rpcGetUserRoomListAsync(userid, [userid, wsContextPtr, client] (std::vector<std::string>& roomlist) {
+        client->rpcGetUserRoomListAsync(userid, "192.168.183.130:5005", 
+            [userid, wsContextPtr, client] (std::vector<std::string>& roomlist) {
 
             if(roomlist.empty()) return;
 

@@ -167,13 +167,15 @@ void grpcClient::rpcclearCursorsAsync(int32_t userid, std::function<void()> call
     });
 }
 
-void grpcClient::rpcGetUserRoomListAsync(int32_t userid, const std::function<void(std::vector<std::string>&)>& callback) {
+void grpcClient::rpcGetUserRoomListAsync(int32_t userid, const std::string& addr, 
+    const std::function<void(std::vector<std::string>&)>& callback) {
 
     auto context = std::make_shared<ClientContext>();
     auto request = std::make_shared<room::GetUserRoomListRequest>();
     auto response = std::make_shared<room::GetUserRoomListResponse>();
 
     request->set_userid(userid);
+    request->set_gatewayip(addr);
 
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
     context->set_deadline(deadline);

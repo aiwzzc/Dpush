@@ -59,7 +59,7 @@ public:
     void rpcCilentMessageAsync(const std::string& message, int32_t userid, std::string username, 
     std::function<void(std::string)> callback);
     void rpcclearCursorsAsync(int32_t userid, std::function<void()>);
-    void rpcGetUserRoomListAsync(int32_t userid, const std::function<void(std::vector<std::string>&)>&);
+    void rpcGetUserRoomListAsync(int32_t userid, const std::string& addr, const std::function<void(std::vector<std::string>&)>&);
     void rpcJoinSessionAsync(int32_t userid, const std::string& roomname, const std::function<void(int, const std::string&, int64_t)>&);
     void rpcCreateSessionAsync(int32_t userid, const std::string& roomname, const std::function<void(int32_t, const std::string&, int64_t)>&);
     void rpcJoinRooms(int32_t userid, std::vector<std::string>& rooms);

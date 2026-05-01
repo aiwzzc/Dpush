@@ -38,6 +38,8 @@ static SendSingleMsgAwaiter async_SendSingleMsg_for_coro(int32_t& user_id, const
     return SendSingleMsgAwaiter{user_id, std::move(msg), loop};
 }
 
+GatewayGrpcServer::GatewayGrpcServer() = default;
+
 DetachedTask GatewayGrpcServer::DosendSingleMsg(grpc::ServerUnaryReactor* reactor, const gateway::sendSingleMsgRequest* request, 
     gateway::sendSingleMsgResponse* response) {
 

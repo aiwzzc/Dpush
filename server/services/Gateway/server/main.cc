@@ -1,7 +1,11 @@
 #include "GatewayServer.h"
 #include "muduo/base/Logging.h"
+#include "config.h"
 
-int main() {
+int main(int argc, char* argv[]) {
+
+    // Config& config = Config::getInstance();
+    // config.Parser(argv[1]);
 
     muduo::Logger::setLogLevel(muduo::Logger::FATAL);
 

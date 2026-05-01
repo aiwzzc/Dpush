@@ -7,6 +7,8 @@
 class GatewayGrpcServer final : public gateway::GatewayServer::CallbackService {
 
 public:
+    GatewayGrpcServer();
+
     grpc::ServerUnaryReactor* sendSingleMsg(grpc::CallbackServerContext*, const gateway::sendSingleMsgRequest*, 
         gateway::sendSingleMsgResponse*) override;
 

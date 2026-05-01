@@ -1,0 +1,6 @@
+service:
+  name: room
+  instance_id: room-1
+  host: 192.168.183.130
+  port: 5007
+  weight: 1

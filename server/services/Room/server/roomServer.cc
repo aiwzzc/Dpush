@@ -11,13 +11,20 @@ Status RoomServer::GetUserRoomList(::grpc::ServerContext* context, const ::room:
     ::room::GetUserRoomListResponse* response) {
 
     std::unordered_set<std::string> roomlists;
-    std::string user_rooms_key = "{user:rooms:" + std::to_string(request->userid()) + "}";
+    std::string user_id_str = std::to_string(request->userid());
+
+    std::string user_rooms_key = "{user:rooms:" + user_id_str + "}";
     this->redis_pool_->smembers(user_rooms_key, std::inserter(roomlists, roomlists.begin()));
 
     for(const auto& room_id : roomlists) {
         auto* info = response->add_roomlist();
         info->set_room_id(room_id);
     }
+
+    std::string user_gateway_key = "{route:uid:" + user_id_str + "}";
+    const std::string& gateway_addr = request->gatewayip();
+    this->redis_pool_->set(user_gateway_key, gateway_addr);
+    this->redis_pool_->expire(user_gateway_key, 3600);
 
     return Status::OK;
 }
