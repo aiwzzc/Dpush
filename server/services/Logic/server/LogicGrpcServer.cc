@@ -191,7 +191,7 @@ struct PullMessageAwaiter {
             std::string stream_ref;
             int get_count = 50;
 
-            if(message_id_) {
+            if(message_id_ >= 0) {
                 stream_ref = "(" + std::to_string(message_id_);
                 this->redis_->xrange(messageKey, stream_ref, "+", get_count, std::back_inserter(this->messages_));
 

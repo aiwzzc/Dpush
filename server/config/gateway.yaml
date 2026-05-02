@@ -1,6 +1,6 @@
 service:
   name: gateway
   instance_id: gw-1
-  host: 192.168.183.130
+  host: 192.168.183.130:5005
   port: 5005
   weight: 1

@@ -47,9 +47,10 @@ void LogicServer::start() {
 
     this->mysql_cluster_->start();
 
+    this->discover_->start();
+
     this->KafkaConsumer_->setgrpcClient(this->grpc_client_.get());
     this->KafkaConsumer_->start();
 
-    this->discover_->start();
     this->LogicGrpcServer_->Wait();
 }

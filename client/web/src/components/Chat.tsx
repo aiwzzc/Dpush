@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { User, Message, Room } from '../types';
-import { Send, Image as ImageIcon, LogOut, Sparkles, Loader2, Hash, Plus, X, Users, MessageSquare, AlertCircle, RefreshCw, Search } from 'lucide-react';
+import { Send, Image as ImageIcon, LogOut, Sparkles, Loader2, Hash, Plus, X, Users, MessageSquare, AlertCircle, RefreshCw, Search, Reply, Copy, Edit2, Forward, Pin, Trash2, Check, CheckCheck } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import * as flatbuffers from 'flatbuffers';
 import localforage from 'localforage';
@@ -20,6 +20,42 @@ const parseTimestamp = (ts: any) => {
   return new Date(numTs);
 };
 
+const mergeHistoryMessages = (existingMsgs: Message[], newMsgs: Message[]): Message[] => {
+  const combined = [...newMsgs, ...existingMsgs];
+  const uniqueMsgs = new Map<string, Message>();
+  
+  // Find local messages that haven't received server_message_id back
+  const unlinkedLocalMsgs = combined.filter(m => (!m.serverMessageId || m.serverMessageId === 0) && m.clientMessageId);
+  
+  combined.forEach(msg => {
+    // If msg is from server history (has serverMessageId but no clientMessageId)
+    if ((msg.serverMessageId !== undefined && msg.serverMessageId > 0) && !msg.clientMessageId) {
+      const matchingLocal = unlinkedLocalMsgs.find(local => 
+        local.senderId === msg.senderId && 
+        local.content === msg.content &&
+        Math.abs(local.timestamp.getTime() - msg.timestamp.getTime()) < 120000 // 2 minutes
+      );
+      
+      if (matchingLocal) {
+        msg.clientMessageId = matchingLocal.clientMessageId;
+        msg.status = 'success';
+      }
+    }
+    
+    const key = msg.clientMessageId ? msg.clientMessageId : ((msg.serverMessageId !== undefined && msg.serverMessageId > 0) 
+      ? `server_${msg.serverMessageId}` 
+      : msg.id);
+      
+    if (!uniqueMsgs.has(key) || (msg.serverMessageId && !uniqueMsgs.get(key)!.serverMessageId)) {
+      uniqueMsgs.set(key, msg);
+    }
+  });
+  
+  const merged = Array.from(uniqueMsgs.values());
+  merged.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  return merged;
+};
+
 interface ChatProps {
   user: User;
   onLogout: () => void;
@@ -34,6 +70,13 @@ export function Chat({ user, onLogout }: ChatProps) {
   const [inputValue, setInputValue] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [ws, setWs] = useState<WebSocket | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, msg: Message } | null>(null);
+
+  useEffect(() => {
+    const handleClick = () => setContextMenu(null);
+    window.addEventListener('click', handleClick);
+    return () => window.removeEventListener('click', handleClick);
+  }, []);
   
   // 创建房间相关的状态
   const [showCreateRoom, setShowCreateRoom] = useState(false);
@@ -237,6 +280,83 @@ export function Chat({ user, onLogout }: ChatProps) {
             return;
           }
 
+          if (payloadType === AnyPayload.HelloMessagePayload) {
+            const { HelloMessagePayload } = await import('../generated/chat_app');
+            const payload = root.payload(new HelloMessagePayload()) as any;
+            
+            const roomsLen = payload.roomsLength();
+            const newRooms: Room[] = [];
+            
+            for (let i = 0; i < roomsLen; i++) {
+              const roomItem = payload.rooms(i);
+              if (roomItem) {
+                const roomId = roomItem.roomId();
+                // Determine if it's a single chat by checking the room_id
+                // Since user ids might be numeric or simple strings, if the room name is the other person's name, we can treat it as single.
+                // For now, if the room doesn't exist, we just add it.
+                newRooms.push({
+                  id: roomId,
+                  name: roomItem.roomname() || roomId,
+                  chatType: ChatType.Group, // Will fall back to whatever
+                  description: 'Loaded from history'
+                });
+                
+                const msgsLen = roomItem.messagesLength();
+                let parsed: Message[] = [];
+                for (let j = 0; j < msgsLen; j++) {
+                  const m = roomItem.messages(j);
+                  if (m) {
+                    const msgIdStr = m.id() || Date.now().toString();
+                    const sMsgId = parseInt(msgIdStr, 10);
+                    parsed.push({
+                      id: msgIdStr,
+                      serverMessageId: !isNaN(sMsgId) ? sMsgId : 0,
+                      sender: m.user()?.username() || 'Unknown',
+                      senderId: Number(m.user()?.userid() || 0),
+                      content: m.content() || '',
+                      timestamp: parseTimestamp(Number(m.timestamp())),
+                      type: m.msgType() === MsgContentType.Image ? 'image' : 'text',
+                      imageUrl: m.imageUrl() || undefined,
+                      replyTo: Number(m.replyTo()) || undefined,
+                      status: 'success'
+                    });
+                  }
+                }
+                
+                // deduplicate and update messages for this room
+                if (parsed.length > 0) {
+                  setMessages(prev => {
+                    const existingMsgs = prev[roomId] || [];
+                    const merged = mergeHistoryMessages(existingMsgs, parsed);
+                    
+                    let maxId = roomMaxServerMsgIdRef.current[roomId] || 0;
+                    merged.forEach(m => {
+                      if (m.serverMessageId !== undefined && m.serverMessageId > maxId) {
+                        maxId = m.serverMessageId;
+                      }
+                    });
+                    roomMaxServerMsgIdRef.current[roomId] = maxId;
+
+                    return { ...prev, [roomId]: merged };
+                  });
+                }
+              }
+            }
+            
+            if (newRooms.length > 0) {
+              setRooms(prev => {
+                const combined = [...newRooms, ...prev];
+                const uniqueIds = new Set();
+                return combined.filter(r => {
+                  if (uniqueIds.has(r.id)) return false;
+                  uniqueIds.add(r.id);
+                  return true;
+                });
+              });
+            }
+            return;
+          }
+
           if (payloadType === AnyPayload.BatchPullRoomHistoryPayload) {
             const payload = root.payload(new BatchPullRoomHistoryPayload()) as BatchPullRoomHistoryPayload;
             const roomId = payload.roomId() || 'general';
@@ -251,70 +371,113 @@ export function Chat({ user, onLogout }: ChatProps) {
                   const chunkBuf = new flatbuffers.ByteBuffer(dataArray);
                   const pos = chunkBuf.readInt32(chunkBuf.position()) + chunkBuf.position();
                   
-                  const itemCheck = new ServerMessageItem();
-                  itemCheck.__init(pos, chunkBuf);
-                  
                   let parsedMsgs: Message[] = [];
-                  
-                  if (itemCheck.timestamp() > 0n || itemCheck.user() !== null) {
-                      parsedMsgs.push({
-                        id: itemCheck.serverMessageId()?.toString() || Date.now().toString(),
-                        clientMessageId: itemCheck.clientMessageId() || undefined,
-                        serverMessageId: Number(itemCheck.serverMessageId()),
-                        sender: itemCheck.user()?.username() || 'Unknown',
-                        senderId: Number(itemCheck.user()?.userid() || 0),
-                        content: itemCheck.content() || '',
-                        timestamp: parseTimestamp(Number(itemCheck.timestamp())),
-                        type: itemCheck.msgType() === MsgContentType.Image ? 'image' : 'text',
-                        imageUrl: itemCheck.imageUrl() || undefined,
-                        replyTo: Number(itemCheck.replyTo()) || undefined,
-                        status: 'success'
-                      });
-                  } else {
-                      let serverPayload: ServerMessagePayload | null = null;
-                      try {
-                        const rootMsg = RootMessage.getRootAsRootMessage(chunkBuf);
-                        if (rootMsg.payloadType() === AnyPayload.ServerMessagePayload) {
-                           serverPayload = rootMsg.payload(new ServerMessagePayload()) as ServerMessagePayload;
-                        }
-                      } catch (e) {}
-  
-                      if (!serverPayload) {
-                        serverPayload = new ServerMessagePayload();
-                        serverPayload.__init(pos, chunkBuf);
+                  let messageFound = false;
+
+                  // 1. Try RootMessage -> ServerMessagePayload
+                  try {
+                    const rootMsg = RootMessage.getRootAsRootMessage(chunkBuf);
+                    if (rootMsg.payloadType() === AnyPayload.ServerMessagePayload) {
+                      const sp = rootMsg.payload(new ServerMessagePayload()) as ServerMessagePayload;
+                      const msgItem = sp.messages();
+                      if (msgItem && msgItem.serverMessageId() > 0n) {
+                        parsedMsgs.push({
+                          id: msgItem.serverMessageId()?.toString() || Date.now().toString(),
+                          clientMessageId: msgItem.clientMessageId() || undefined,
+                          serverMessageId: Number(msgItem.serverMessageId()),
+                          sender: msgItem.user()?.username() || 'Unknown',
+                          senderId: Number(msgItem.user()?.userid() || 0),
+                          content: msgItem.content() || '',
+                          timestamp: parseTimestamp(Number(msgItem.timestamp())),
+                          type: msgItem.msgType() === MsgContentType.Image ? 'image' : 'text',
+                          imageUrl: msgItem.imageUrl() || undefined,
+                          replyTo: Number(msgItem.replyTo()) || undefined,
+                          status: 'success'
+                        });
+                        messageFound = true;
                       }
-  
-                      if (serverPayload) {
-                         try {
-                           const item = serverPayload.messages();
-                           if (item) {
-                              const senderInfo = item.user()?.username();
-                              const contentInfo = item.content();
-                              
-                              // Make sure it is not a garbage parsed item
-                              if (senderInfo || contentInfo !== null || item.timestamp() > 0n) {
-                                parsedMsgs.push({
-                                  id: item.serverMessageId()?.toString() || Date.now().toString(),
-                                  clientMessageId: item.clientMessageId() || undefined,
-                                  serverMessageId: Number(item.serverMessageId()),
-                                  sender: senderInfo || 'Unknown',
-                                  senderId: Number(item.user()?.userid() || 0),
-                                  content: contentInfo || '',
-                                  timestamp: parseTimestamp(Number(item.timestamp())),
-                                  type: item.msgType() === MsgContentType.Image ? 'image' : 'text',
-                                  imageUrl: item.imageUrl() || undefined,
-                                  replyTo: Number(item.replyTo()) || undefined,
-                                  status: 'success'
-                                });
-                              }
-                           }
-                         } catch (e) {
-                           console.error("Failed to parse inner ServerMessagePayload", e);
-                         }
+                    }
+                  } catch (e) {}
+
+                  // 2. Try raw ServerMessagePayload
+                  if (!messageFound) {
+                    try {
+                      const sp = new ServerMessagePayload();
+                      sp.__init(pos, chunkBuf);
+                      const msgItem = sp.messages();
+                      if (msgItem && msgItem.serverMessageId() > 0n) {
+                        parsedMsgs.push({
+                          id: msgItem.serverMessageId()?.toString() || Date.now().toString(),
+                          clientMessageId: msgItem.clientMessageId() || undefined,
+                          serverMessageId: Number(msgItem.serverMessageId()),
+                          sender: msgItem.user()?.username() || 'Unknown',
+                          senderId: Number(msgItem.user()?.userid() || 0),
+                          content: msgItem.content() || '',
+                          timestamp: parseTimestamp(Number(msgItem.timestamp())),
+                          type: msgItem.msgType() === MsgContentType.Image ? 'image' : 'text',
+                          imageUrl: msgItem.imageUrl() || undefined,
+                          replyTo: Number(msgItem.replyTo()) || undefined,
+                          status: 'success'
+                        });
+                        messageFound = true;
                       }
+                    } catch (e) {}
                   }
 
-                  newMsgs.push(...parsedMsgs.filter(m => m.serverMessageId > 0 || m.content !== ''));
+                  // 3. Try ServerMessageItem
+                  if (!messageFound) {
+                    try {
+                      const msgItem = new ServerMessageItem();
+                      msgItem.__init(pos, chunkBuf);
+                      if (msgItem.user() && msgItem.serverMessageId() > 0n) {
+                        parsedMsgs.push({
+                          id: msgItem.serverMessageId()?.toString() || Date.now().toString(),
+                          clientMessageId: msgItem.clientMessageId() || undefined,
+                          serverMessageId: Number(msgItem.serverMessageId()),
+                          sender: msgItem.user()?.username() || 'Unknown',
+                          senderId: Number(msgItem.user()?.userid() || 0),
+                          content: msgItem.content() || '',
+                          timestamp: parseTimestamp(Number(msgItem.timestamp())),
+                          type: msgItem.msgType() === MsgContentType.Image ? 'image' : 'text',
+                          imageUrl: msgItem.imageUrl() || undefined,
+                          replyTo: Number(msgItem.replyTo()) || undefined,
+                          status: 'success'
+                        });
+                        messageFound = true;
+                      }
+                    } catch (e) {}
+                  }
+
+                  // 4. Try RoomMessageItem
+                  if (!messageFound) {
+                    try {
+                      // Note: We need to dynamically import RoomMessageItem or ensure it's in scope.
+                      // We will use existing RoomItem/RoomMessageItem from generated types.
+                      const { RoomMessageItem } = await import('../generated/chat_app');
+                      const rMsg = new RoomMessageItem();
+                      rMsg.__init(pos, chunkBuf);
+                      const sidStr = rMsg.id();
+                      if (rMsg.user() && sidStr) {
+                         const sMsgId = parseInt(sidStr, 10);
+                         parsedMsgs.push({
+                            id: sidStr,
+                            clientMessageId: undefined,
+                            serverMessageId: !isNaN(sMsgId) ? sMsgId : 0,
+                            sender: rMsg.user()?.username() || 'Unknown',
+                            senderId: Number(rMsg.user()?.userid() || 0),
+                            content: rMsg.content() || '',
+                            timestamp: parseTimestamp(Number(rMsg.timestamp())),
+                            type: rMsg.msgType() === MsgContentType.Image ? 'image' : 'text',
+                            imageUrl: rMsg.imageUrl() || undefined,
+                            replyTo: Number(rMsg.replyTo()) || undefined,
+                            status: 'success'
+                         });
+                         messageFound = true;
+                      }
+                    } catch(e) {}
+                  }
+
+                  newMsgs.push(...parsedMsgs.filter(m => m.senderId > 0 && m.content !== ''));
                 } catch (e) {
                   console.error('Failed to parse chunk from BatchPullRoomHistoryPayload:', e);
                 }
@@ -324,11 +487,7 @@ export function Chat({ user, onLogout }: ChatProps) {
             if (newMsgs.length > 0) {
               setMessages(prev => {
                 const existingMsgs = prev[roomId] || [];
-                const existingIds = new Set(existingMsgs.map(m => m.id));
-                const filtered = newMsgs.filter(m => !existingIds.has(m.id));
-                if (filtered.length === 0) return prev;
-                
-                const merged = [...existingMsgs, ...filtered].sort((a,b) => a.timestamp.getTime() - b.timestamp.getTime());
+                const merged = mergeHistoryMessages(existingMsgs, newMsgs);
                 
                 let maxId = roomMaxServerMsgIdRef.current[roomId] || 0;
                 merged.forEach(m => {
@@ -346,7 +505,17 @@ export function Chat({ user, onLogout }: ChatProps) {
 
           if (payloadType === AnyPayload.ServerMessagePayload) {
             const payload = root.payload(new ServerMessagePayload()) as ServerMessagePayload;
-            const roomId = payload.sessionId() || 'general';
+            let roomId = payload.sessionId() || 'general';
+            
+            if (payload.chatType() === ChatType.Single) {
+              const msgItem = payload.messages();
+              if (msgItem) {
+                const incomingSenderId = Number(msgItem.user()?.userid() || 0);
+                if (incomingSenderId !== 0 && incomingSenderId !== Number(currentUser.userid)) {
+                  roomId = incomingSenderId.toString();
+                }
+              }
+            }
             
             let messagesToAdd: Message[] = [];
             let hasNewMessages = false;
@@ -403,46 +572,38 @@ export function Chat({ user, onLogout }: ChatProps) {
 
             sortedMessages.forEach((msgRaw: any) => {
               const serverMessageId = msgRaw.serverMessageId !== undefined ? Number(msgRaw.serverMessageId) : NaN;
+              
+              processMsg(msgRaw, serverMessageId);
 
               if (!isNaN(serverMessageId)) {
-                const currentMax = roomMaxServerMsgIdRef.current[roomId];
+                const currentMax = roomMaxServerMsgIdRef.current[roomId] || 0;
                 
-                if (currentMax === undefined) {
-                  processMsg(msgRaw, serverMessageId);
-                } else if (serverMessageId <= currentMax) {
-                  console.log(`Ignored duplicate or old message ${serverMessageId} for room ${roomId}`);
-                } else if (serverMessageId === currentMax + 1) {
-                  processMsg(msgRaw, serverMessageId);
-                } else {
-                  if (!pendingMessagesRef.current[roomId]) {
-                    pendingMessagesRef.current[roomId] = {};
-                  }
-                  pendingMessagesRef.current[roomId][serverMessageId] = msgRaw;
+                if (serverMessageId > currentMax) {
+                  roomMaxServerMsgIdRef.current[roomId] = serverMessageId;
                   
-                  const missingIds: number[] = [];
-                  for (let id = currentMax + 1; id < serverMessageId; id++) {
-                    if (!pendingMessagesRef.current[roomId][id]) {
+                  // Request missing messages if there's a gap
+                  if (serverMessageId > currentMax + 1 && currentMax > 0) {
+                    const missingIds: number[] = [];
+                    for (let id = currentMax + 1; id < serverMessageId; id++) {
+                      // Optionally check a pending set, but for simplicity we can just request them
+                      // since the backend can safely return what it has.
                       missingIds.push(id);
                     }
-                  }
-                  
-                  if (missingIds.length > 0) {
-                    const delay = Math.floor(Math.random() * 1900) + 100;
-                    setTimeout(() => {
-                      const currentMaxNow = roomMaxServerMsgIdRef.current[roomId] || 0;
-                      const stillMissing = missingIds.filter(id => 
-                        currentMaxNow < id && !pendingMessagesRef.current[roomId]?.[id]
-                      );
-                      
-                      if (stillMissing.length > 0 && socket.readyState === WebSocket.OPEN) {
-                        const pullReqBuf = encodePullMissingMessages(roomId, stillMissing);
-                        socket.send(pullReqBuf);
-                      }
-                    }, delay);
+                    
+                    if (missingIds.length > 0) {
+                      const delay = Math.floor(Math.random() * 1900) + 100;
+                      setTimeout(() => {
+                        const currentMaxNow = roomMaxServerMsgIdRef.current[roomId] || 0;
+                        // Only request what is truly missing now
+                        const stillMissing = missingIds.filter(id => currentMaxNow < id);
+                        if (stillMissing.length > 0 && socket.readyState === WebSocket.OPEN) {
+                          const pullReqBuf = encodePullMissingMessages(roomId, stillMissing);
+                          socket.send(pullReqBuf);
+                        }
+                      }, delay);
+                    }
                   }
                 }
-              } else {
-                processMsg(msgRaw, NaN);
               }
             });
 
@@ -461,7 +622,6 @@ export function Chat({ user, onLogout }: ChatProps) {
 
               setMessages(prev => {
                 const existingRoomMsgs = prev[roomId] || [];
-                const newRoomMsgs = [...existingRoomMsgs];
                 
                 messagesToAdd.forEach(newMsg => {
                   if (newMsg.clientMessageId) {
@@ -474,27 +634,22 @@ export function Chat({ user, onLogout }: ChatProps) {
                       delete businessTimeoutTimersRef.current[newMsg.clientMessageId];
                     }
                   }
-
-                  const existingIdx = newRoomMsgs.findIndex(m => 
-                    (m.clientMessageId && m.clientMessageId === newMsg.clientMessageId) || 
-                    m.id === newMsg.id
-                  );
-
-                  if (existingIdx >= 0) {
-                    newRoomMsgs[existingIdx] = {
-                      ...newRoomMsgs[existingIdx],
-                      ...newMsg,
-                      status: 'success'
-                    };
-                  } else {
-                    newRoomMsgs.push({ ...newMsg, status: 'success' });
-                  }
                 });
 
-                newRoomMsgs.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+                const merged = mergeHistoryMessages(existingRoomMsgs, messagesToAdd);
+                
+                // Let's also enforce updating the global max id based on the actual merged stream
+                let finalMaxId = roomMaxServerMsgIdRef.current[roomId] || 0;
+                merged.forEach(m => {
+                  if (m.serverMessageId !== undefined && m.serverMessageId > finalMaxId) {
+                    finalMaxId = m.serverMessageId;
+                  }
+                });
+                roomMaxServerMsgIdRef.current[roomId] = finalMaxId;
+                
                 return {
                   ...prev,
-                  [roomId]: newRoomMsgs
+                  [roomId]: merged
                 };
               });
               
@@ -540,8 +695,8 @@ export function Chat({ user, onLogout }: ChatProps) {
 
             setMessages(prev => {
               const existingMessages = prev[roomId] || [];
-              const updatedRoomMessages = [...incomingMessages, ...existingMessages];
-              updatedRoomMessages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+              const updatedRoomMessages = mergeHistoryMessages(existingMessages, incomingMessages);
+              
               return {
                 ...prev,
                 [roomId]: updatedRoomMessages
@@ -664,9 +819,7 @@ export function Chat({ user, onLogout }: ChatProps) {
 
             setMessages(prev => {
               const existingMsgs = prev[roomId] || [];
-              const existingIds = new Set(existingMsgs.map(m => m.id));
-              const filtered = newMsgs.filter(m => !existingIds.has(m.id));
-              const merged = [...existingMsgs, ...filtered].sort((a,b) => a.timestamp.getTime() - b.timestamp.getTime());
+              const merged = mergeHistoryMessages(existingMsgs, newMsgs);
               
               let maxId = roomMaxServerMsgIdRef.current[roomId] || 0;
               merged.forEach(m => {
@@ -812,7 +965,9 @@ export function Chat({ user, onLogout }: ChatProps) {
         senderId: Number(currentUser.userid),
         content,
         timestamp: new Date(),
-        type: 'text',
+        type: msgType,
+        imageUrl: imageUrl,
+        replyTo: replyTo,
         status: 'sending'
       };
       setMessages(prev => ({
@@ -1408,76 +1563,107 @@ export function Chat({ user, onLogout }: ChatProps) {
                   <p className="text-lg tracking-wide">Start the conversation</p>
                 </div>
               ) : (
-                <div className="flex flex-col gap-6 px-6 py-4">
-              {currentMessages.map((msg) => {
-                const isMe = msg.sender === currentUser.username;
+                <div className="flex flex-col px-4 py-2 pb-6">
+              {currentMessages.map((msg, index) => {
+                const isMe = msg.senderId ? msg.senderId === Number(currentUser.userid) : msg.sender === currentUser.username;
                 const isAI = msg.sender === 'AI Assistant';
+                
+                const prevMsg = index > 0 ? currentMessages[index - 1] : null;
+                const nextMsg = index < currentMessages.length - 1 ? currentMessages[index + 1] : null;
+
+                const isSameSenderAsPrev = prevMsg && (prevMsg.sender === msg.sender) && (msg.timestamp.getTime() - prevMsg.timestamp.getTime() < 5 * 60 * 1000);
+                const isSameSenderAsNext = nextMsg && (nextMsg.sender === msg.sender) && (nextMsg.timestamp.getTime() - msg.timestamp.getTime() < 5 * 60 * 1000);
+                
+                const showAvatar = !isSameSenderAsNext;
+                const showName = !isSameSenderAsPrev;
+                const showTail = !isSameSenderAsNext;
+
                 return (
-                  <div key={msg.id} className={`flex gap-3 w-full ${isMe ? 'flex-row-reverse' : 'flex-row'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+                  <div id={`msg-${msg.serverMessageId || msg.clientMessageId || msg.id}`} key={msg.id} onDoubleClick={() => setReplyingTo(msg)} className={`flex w-full ${isMe ? 'flex-row-reverse pl-10' : 'flex-row pr-10'} ${isSameSenderAsPrev ? 'mt-0.5' : 'mt-2'} items-end group animate-in fade-in slide-in-from-bottom-1 duration-200 transition-colors`}>
                     {/* Avatar */}
-                    <div 
-                      onClick={() => !isMe && !isAI && handleUserClick({id: msg.senderId || msg.sender, name: msg.sender})}
-                      className={`w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center font-bold text-white shadow-sm ${isAI ? 'bg-blue-600' : 'bg-zinc-800'} ${!isMe && !isAI ? 'cursor-pointer hover:ring-2 hover:ring-white/20 transition-all' : ''}`}
-                      title={!isMe ? "Direct Message" : undefined}
-                    >
-                      {isAI ? <Sparkles size={18} /> : msg.sender.charAt(0).toUpperCase()}
-                    </div>
-                    
-                    {/* Content */}
-                    <div className={`flex flex-col max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
-                      <div className={`flex items-baseline gap-2 mb-1.5 px-1 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-                        <span className="text-sm font-bold text-zinc-300">
-                          {msg.sender}
-                        </span>
-                        <span className="text-xs text-zinc-500">
-                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                      
-                      <div 
-                        onContextMenu={(e) => { e.preventDefault(); setReplyingTo(msg); }}
-                        className={`relative px-4 py-3 text-base leading-relaxed shadow-sm group ${
-                        isMe 
-                          ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm' 
-                          : isAI
-                            ? 'bg-zinc-900 border border-blue-500/30 text-zinc-200 rounded-2xl rounded-tl-sm'
-                            : 'bg-zinc-900 border border-zinc-800 text-zinc-200 rounded-2xl rounded-tl-sm'
-                      }`}>
-                        {msg.replyTo && (
-                          <div className={`text-xs px-2 py-1 mb-2 rounded border-l-2 bg-black/20 ${isMe ? 'border-blue-300 text-blue-100' : 'border-zinc-500 text-zinc-400'}`}>
-                            Replied to message
+                    {!isMe && (
+                      <div className="w-9 flex-shrink-0 flex items-end justify-center mr-2 mb-0.5">
+                        {showAvatar && (
+                          <div 
+                            onClick={() => !isAI && handleUserClick({id: msg.senderId || msg.sender, name: msg.sender})}
+                            className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-white shadow-sm ${isAI ? 'bg-blue-500' : 'bg-indigo-500 text-sm'} ${!isAI ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''}`}
+                            title="Direct Message"
+                          >
+                            {isAI ? <Sparkles size={16} /> : msg.sender.charAt(0).toUpperCase()}
                           </div>
                         )}
+                      </div>
+                    )}
+                    
+                    {/* Content */}
+                    <div className={`flex flex-col max-w-[85%] ${isMe ? 'items-end' : 'items-start'}`}>
+                      {!isMe && showName && (
+                        <span className="text-[13px] font-medium text-blue-400 mb-0.5 pl-3">
+                          {msg.sender}
+                        </span>
+                      )}
+                      
+                      <div 
+                        onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, msg }); }}
+                        className={`relative px-3 py-1.5 text-[15px] leading-relaxed shadow-sm flex flex-col ${
+                        isMe 
+                          ? 'bg-[#2b5278] text-[#e4ecf2] ' + (showTail ? 'rounded-2xl rounded-br-sm' : 'rounded-2xl')
+                          : isAI
+                            ? 'bg-[#18222d] border-blue-500/30 text-[#e4ecf2] ' + (showTail ? 'rounded-2xl rounded-bl-sm' : 'rounded-2xl')
+                            : 'bg-[#18222d] text-[#e4ecf2] ' + (showTail ? 'rounded-2xl rounded-bl-sm' : 'rounded-2xl')
+                      } hover:brightness-[1.05] transition-all duration-200 active:scale-[0.98]`}>
+                        
+                        {msg.replyTo && (
+                          <div 
+                            onClick={(e) => {
+                               e.stopPropagation();
+                               const matchedMsg = currentMessages.find(m => m.serverMessageId === msg.replyTo);
+                               const targetId = `msg-${msg.replyTo}`;
+                               const el = document.getElementById(targetId);
+                               if(el) {
+                                  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                  el.classList.add('bg-white/10');
+                                  setTimeout(() => {
+                                    if(el) el.classList.remove('bg-white/10');
+                                  }, 1500);
+                               }
+                            }}
+                            className={`text-[13px] px-2 py-0.5 mb-1 rounded border-l-2 bg-black/10 ${isMe ? 'border-blue-400 text-blue-200' : 'border-indigo-400 text-indigo-300'} cursor-pointer hover:bg-black/20 transition-colors`}>
+                            <div className="font-medium text-blue-300">{currentMessages.find(m => m.serverMessageId === msg.replyTo)?.sender || 'Unknown'}</div>
+                            <div className="truncate opacity-80 text-xs">
+                               {currentMessages.find(m => m.serverMessageId === msg.replyTo)?.content || 'Message'}
+                            </div>
+                          </div>
+                        )}
+                        
                         {msg.type === 'text' && (
-                          <div className={`flex items-center gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-                            {msg.isGenerating && <Loader2 size={14} className="animate-spin text-blue-400" />}
-                            <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-                            {isMe && msg.status === 'sending' && (
-                              <Loader2 size={14} className="animate-spin text-blue-200 ml-1 flex-shrink-0" />
-                            )}
-                            {isMe && msg.status === 'failed' && (
-                              <div className="flex items-center ml-1 flex-shrink-0 gap-1">
-                                <AlertCircle size={14} className="text-red-300" title="Failed to send" />
-                                <button 
-                                  onClick={() => sendClientMessage(currentRoom!.id, msg.content, msg.clientMessageId!, true)}
-                                  className="text-blue-200 hover:text-white transition-colors p-1"
-                                  title="Retry"
-                                >
-                                  <RefreshCw size={12} />
-                                </button>
-                              </div>
-                            )}
+                          <div className="relative break-words min-w-[50px]">
+                            <span className="whitespace-pre-wrap">{msg.content}</span>
+                            <span className="float-right inline-flex items-center gap-1 select-none translate-y-[6px] ml-3 mb-[-2px]">
+                               <span className="text-[11px] opacity-60">
+                                 {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                               </span>
+                               {isMe && (
+                                 <span className={msg.status === 'success' || !msg.status ? 'text-[#60c0ff]' : (msg.status === 'sending' ? 'text-[#e4ecf2]/50' : 'text-red-400')}>
+                                   {msg.status === 'failed' ? (
+                                     <button onClick={() => sendClientMessage(currentRoom!.id, msg.content, msg.clientMessageId!, true)} className="hover:text-red-300 transition-colors" title="Retry">
+                                        <AlertCircle size={14} />
+                                     </button>
+                                   ) : (
+                                     (msg.status === 'success' || !msg.status) ? <CheckCheck size={14} /> : <Check size={14} />
+                                   )}
+                                 </span>
+                               )}
+                            </span>
+                            {/* clear float */}
+                            <div className="clear-both hidden"></div>
                           </div>
                         )}
                         
                         {msg.type === 'image' && (
-                          <div className="space-y-3">
-                            <p className={`text-sm flex items-center gap-1.5 ${isMe ? 'text-blue-100' : 'text-zinc-400'}`}>
-                              <Sparkles size={14} />
-                              {msg.content}
-                            </p>
+                          <div className="space-y-1 relative group/img cursor-pointer">
                             {msg.isGenerating ? (
-                              <div className="w-64 h-64 bg-zinc-900/50 rounded-xl flex flex-col items-center justify-center gap-3 animate-pulse border border-zinc-800/50">
+                              <div className="w-64 h-64 bg-black/20 rounded-lg flex flex-col items-center justify-center gap-3 animate-pulse">
                                 <Loader2 className="w-8 h-8 animate-spin text-zinc-500" />
                                 <span className="text-sm font-medium text-zinc-500">Generating...</span>
                               </div>
@@ -1486,29 +1672,35 @@ export function Chat({ user, onLogout }: ChatProps) {
                                 <img 
                                   src={msg.imageUrl} 
                                   alt={msg.content} 
-                                  className={`rounded-xl max-w-sm h-auto border border-zinc-800/50 cursor-pointer shadow-md ${msg.status === 'sending' ? 'opacity-70' : ''}`}
+                                  className={`rounded-lg max-w-xs sm:max-w-sm h-auto shadow-sm ${msg.status === 'sending' ? 'opacity-80' : ''}`}
                                   referrerPolicy="no-referrer"
                                   onClick={() => window.open(msg.imageUrl, '_blank')}
                                 />
-                                {isMe && msg.status === 'sending' && (
-                                  <div className="absolute top-2 right-2 bg-black/50 rounded-full p-1">
-                                    <Loader2 size={16} className="animate-spin text-white" />
-                                  </div>
-                                )}
-                                {isMe && msg.status === 'failed' && (
-                                  <div className="absolute top-2 right-2 bg-black/50 rounded-full p-1 flex items-center gap-1">
-                                    <AlertCircle size={16} className="text-red-500" title="Failed to send" />
-                                    <button 
-                                      onClick={() => sendClientMessage(currentRoom!.id, msg.content, msg.clientMessageId!, true, 'image', msg.imageUrl)}
-                                      className="text-white hover:text-red-400 transition-colors bg-black/50 hover:bg-black/80 rounded-full p-1"
-                                      title="Retry"
-                                    >
-                                      <RefreshCw size={14} />
-                                    </button>
-                                  </div>
-                                )}
+                                <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/10 transition-colors rounded-lg pointer-events-none" />
                               </div>
                             ) : null}
+                            <div className="flex items-end justify-between gap-3 px-1 mt-1">
+                               <p className={`text-[13px] flex items-center gap-1.5 opacity-90`}>
+                                 <Sparkles size={14} className="text-blue-400" />
+                                 {msg.content}
+                               </p>
+                               <span className="inline-flex items-center gap-1 select-none opacity-60">
+                                 <span className="text-[11px]">
+                                   {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                 </span>
+                                 {isMe && (
+                                   <span className={msg.status === 'success' || !msg.status ? 'text-[#60c0ff]' : (msg.status === 'sending' ? 'text-[#e4ecf2]/50' : 'text-red-400')}>
+                                     {msg.status === 'failed' ? (
+                                        <button onClick={() => sendClientMessage(currentRoom!.id, msg.content, msg.clientMessageId!, true, 'image', msg.imageUrl)} className="hover:text-red-300 transition-colors" title="Retry">
+                                           <AlertCircle size={14} />
+                                        </button>
+                                     ) : (
+                                       (msg.status === 'success' || !msg.status) ? <CheckCheck size={14} /> : <Check size={14} />
+                                     )}
+                                   </span>
+                                 )}
+                               </span>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1542,14 +1734,17 @@ export function Chat({ user, onLogout }: ChatProps) {
         <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black via-black/90 to-transparent pointer-events-none">
           <div className="max-w-4xl mx-auto pointer-events-auto">
             {replyingTo && (
-              <div className="mb-2 mx-4 p-3 bg-zinc-900 border border-zinc-800 rounded-xl relative animate-in fade-in slide-in-from-bottom-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-blue-400">Replying to {replyingTo.sender}</span>
-                  <button onClick={() => setReplyingTo(null)} className="text-zinc-500 hover:text-zinc-300">
-                    <X size={16} />
+              <div className="mb-2 mx-4 flex animate-in fade-in slide-in-from-bottom-2">
+                <div className="flex-1 flex gap-3 px-3 py-2 bg-[#18222d]/90 backdrop-blur-md rounded-2xl shadow-lg border border-white/5 relative overflow-hidden">
+                  <div className="absolute left-0 top-2 bottom-2 w-1 bg-blue-500 rounded-r-md"></div>
+                  <div className="ml-2 flex-1 flex flex-col justify-center min-w-0 pb-0.5">
+                    <span className="text-[14px] font-medium text-blue-400">Reply to {replyingTo.sender}</span>
+                    <span className="text-[13px] text-[#e4ecf2]/70 truncate">{replyingTo.type === 'image' ? '🖼️ Photo' : replyingTo.content}</span>
+                  </div>
+                  <button type="button" onClick={() => setReplyingTo(null)} className="flex-shrink-0 text-[#e4ecf2]/50 hover:text-[#e4ecf2] p-1.5 transition-colors self-center mr-1">
+                    <X size={18} />
                   </button>
                 </div>
-                <p className="text-zinc-400 text-sm mt-1 truncate">{replyingTo.content}</p>
               </div>
             )}
             <form onSubmit={handleSendMessage} className="flex items-end gap-2 p-2 bg-zinc-900/80 backdrop-blur-2xl border border-white/10 rounded-[2.5rem] shadow-2xl">
@@ -1681,6 +1876,47 @@ export function Chat({ user, onLogout }: ChatProps) {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Telegram-style Context Menu */}
+      {contextMenu && (
+        <div 
+          className="fixed z-50 w-56 py-1 bg-[#1c242f] rounded-lg shadow-xl shadow-black/50 border border-zinc-800/50 text-[#e4ecf2] overflow-hidden animate-in fade-in zoom-in-95 duration-100"
+          style={{ 
+            top: Math.min(contextMenu.y, window.innerHeight - 250), 
+            left: Math.min(contextMenu.x, window.innerWidth - 250) 
+          }}
+        >
+          <button className="w-full px-4 py-2.5 text-left flex items-center gap-4 hover:bg-[#2b5278] active:bg-[#32608c] transition-colors"
+            onClick={(e) => { e.stopPropagation(); setReplyingTo(contextMenu.msg); setContextMenu(null); }}>
+            <Reply size={20} className="text-[#e4ecf2]/80" />
+            <span className="text-[15px] font-medium">Reply</span>
+          </button>
+          <button className="w-full px-4 py-2.5 text-left flex items-center gap-4 hover:bg-[#2b5278] active:bg-[#32608c] transition-colors"
+            onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(contextMenu.msg.content); setContextMenu(null); }}>
+            <Copy size={20} className="text-[#e4ecf2]/80" />
+            <span className="text-[15px] font-medium">Copy Text</span>
+          </button>
+          
+          <div className="h-[1px] bg-zinc-800/50 my-1 mx-2"></div>
+          
+          <button className="w-full px-4 py-2.5 text-left flex items-center gap-4 hover:bg-[#2b5278] active:bg-[#32608c] transition-colors opacity-60">
+            <Edit2 size={20} className="text-[#e4ecf2]/80" />
+            <span className="text-[15px] font-medium">Edit</span>
+          </button>
+          <button className="w-full px-4 py-2.5 text-left flex items-center gap-4 hover:bg-[#2b5278] active:bg-[#32608c] transition-colors opacity-60">
+            <Pin size={20} className="text-[#e4ecf2]/80" />
+            <span className="text-[15px] font-medium">Pin</span>
+          </button>
+          <button className="w-full px-4 py-2.5 text-left flex items-center gap-4 hover:bg-[#2b5278] active:bg-[#32608c] transition-colors opacity-60">
+            <Forward size={20} className="text-[#e4ecf2]/80" />
+            <span className="text-[15px] font-medium">Forward</span>
+          </button>
+          <button className="w-full px-4 py-2.5 text-left flex items-center gap-4 hover:bg-red-500/20 active:bg-red-500/30 text-red-500 transition-colors">
+            <Trash2 size={20} className="text-red-500/80" />
+            <span className="text-[15px] font-medium">Delete</span>
+          </button>
         </div>
       )}
     </div>

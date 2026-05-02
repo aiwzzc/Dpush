@@ -1,0 +1,42 @@
+!yamlscript/v0:
+
+:use common: :all
+:: workflow-setup()
+
+jobs:
+  #log-github-event:
+  #  name: log github event
+  #  runs-on: ubuntu-24.04
+  #  steps:
+  #    - name: log github event
+  #      run: echo "${{toJSON(github.event)}}" || echo >/dev/null
+
+  check_workflows:
+    :: setup-job('infra' 'check_workflows')
+    runs-on: ubuntu-24.04
+    steps:
+      - :: checkout-action
+      - name: install ys
+        run: make -C .github/workflows install-ys
+      - name: generate workflows
+        run: make -C .github/workflows build
+      - name: test status of workflows
+        run: |
+          wc --version
+          wc --help
+          make -C .github/workflows test
+          status=$?
+          if [ $status != 0 ] ; then
+            echo "ERROR: generated workflows are out of date"
+          fi
+          exit $status
+
+  check_fast_float:
+    :: setup-job('infra' 'check_fast_float')
+    runs-on: ubuntu-24.04
+    steps:
+      - :: checkout-action
+      - name: check status of fast_float_all.h
+        run: |
+          python tools/amalgamate.py > /dev/null
+          git diff --exit-code src/c4/ext/fast_float_all.h

@@ -1,0 +1,347 @@
+# DO NOT EDIT - GENERATED FROM .github/workflows/embedded.ys
+
+name: embedded
+defaults:
+  run:
+    shell: bash -e -x {0}
+'on':
+  workflow_dispatch: null
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - '*'
+env:
+  PROJ_PKG_NAME: rapidyaml-
+  PROJ_PFX_TARGET: ryml-
+  PROJ_PFX_CMAKE: RYML_
+  CMAKE_FLAGS: -DRYML_TEST_SUITE=ON
+  NUM_JOBS_BUILD: null
+jobs:
+  canary:
+    if: always()
+    continue-on-error: false
+    name: ${{matrix.arch}}/c++${{matrix.std}}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - arch: armv7
+          tc: arm-linux-gnueabihf
+          std: 11
+          heavybuild: 0
+          flags: -march=armv7+fp
+    steps:
+    - name: checkout (action)
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - name: install
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+            gcc${{matrix.version}}-${{matrix.tc}} \
+            g++${{matrix.version}}-${{matrix.tc}} \
+            qemu-user-static
+    - name: info
+      run: |
+        ${{matrix.tc}}-g++${{matrix.version}} --version
+        ${{matrix.tc}}-g++${{matrix.version}} -dM -E - </dev/null | sort
+        ${{matrix.tc}}-g++${{matrix.version}} ${{matrix.flags}} -dM -E - </dev/null | sort
+    - name: '-------------------------------------------------'
+      run: echo ${{matrix.arch}}/c++${{matrix.std}}std/Debug
+    - name: configure ${{matrix.arch}}/c++${{matrix.std}}/Debug
+      run: |
+        touch build
+        rm -rf build
+        export C4_EXTERN_DIR=`pwd`/build/extern
+        cmake -S . -B build \
+            -DCMAKE_TOOLCHAIN_FILE=ext/c4core/.github/toolchains/${{matrix.arch}}.cmake \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS=" ${{matrix.flags}} " \
+            -DCMAKE_C_FLAGS=" ${{matrix.flags}} " \
+            -DC4_CXX_STANDARD=${{matrix.std}} \
+            -DCXX_STANDARD=${{matrix.std}} \
+            -DRYML_DEV=ON \
+            -DRYML_BUILD_BENCHMARKS=OFF \
+            -DRYML_SANITIZE=OFF \
+            -DRYML_LINT=OFF \
+            -DRYML_VALGRIND=OFF
+    - name: build ${{matrix.arch}}/c++${{matrix.std}}/Debug
+      run: |
+        numprocs=`nproc`
+        if [ ${{matrix.heavybuild}} == 2 ] ; then
+            if (( $numprocs > 1 )) ; then
+                numprocs=$(($numprocs / 2))
+            fi
+        fi
+        export CMAKE_BUILD_PARALLEL_LEVEL=$numprocs
+        cmake --build build --parallel $numprocs --target ryml-test-build
+    - name: test ${{matrix.arch}}/c++${{matrix.std}}/Debug
+      run: |
+        export CTEST_PARALLEL_LEVEL=`nproc`
+        cmake --build build --target ryml-test-run
+    - name: '-------------------------------------------------'
+      run: echo ${{matrix.arch}}/c++${{matrix.std}}std/Release
+    - name: configure ${{matrix.arch}}/c++${{matrix.std}}/Release
+      run: |
+        touch build
+        rm -rf build
+        export C4_EXTERN_DIR=`pwd`/build/extern
+        cmake -S . -B build \
+            -DCMAKE_TOOLCHAIN_FILE=ext/c4core/.github/toolchains/${{matrix.arch}}.cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_FLAGS=" ${{matrix.flags}} " \
+            -DCMAKE_C_FLAGS=" ${{matrix.flags}} " \
+            -DC4_CXX_STANDARD=${{matrix.std}} \
+            -DCXX_STANDARD=${{matrix.std}} \
+            -DRYML_DEV=ON \
+            -DRYML_BUILD_BENCHMARKS=OFF \
+            -DRYML_SANITIZE=OFF \
+            -DRYML_LINT=OFF \
+            -DRYML_VALGRIND=OFF
+    - name: build ${{matrix.arch}}/c++${{matrix.std}}/Release
+      run: |
+        numprocs=`nproc`
+        if [ ${{matrix.heavybuild}} != 0 ] ; then
+            if (( $numprocs > 1 )) ; then
+                numprocs=$(($numprocs / 2))
+            fi
+        fi
+        export CMAKE_BUILD_PARALLEL_LEVEL=$numprocs
+        cmake --build build --parallel $numprocs --target ryml-test-build
+    - name: test ${{matrix.arch}}/c++${{matrix.std}}/Release
+      run: |
+        export CTEST_PARALLEL_LEVEL=`nproc`
+        cmake --build build --target ryml-test-run
+  xcompile:
+    needs:
+    - canary
+    if: always()
+    continue-on-error: false
+    name: ${{matrix.arch}}/c++${{matrix.std}}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - arch: armv7
+          tc: arm-linux-gnueabihf
+          std: 20
+          heavybuild: 1
+          flags: -march=armv7+fp
+        - arch: armv6
+          tc: arm-linux-gnueabi
+          std: 11
+          heavybuild: 0
+          flags: -march=armv6+fp
+        - arch: armv6
+          tc: arm-linux-gnueabi
+          std: 20
+          heavybuild: 1
+          flags: -march=armv6+fp
+        - arch: armv5
+          tc: arm-linux-gnueabi
+          std: 11
+          heavybuild: 0
+          flags: -march=armv5te+fp
+        - arch: armv5
+          tc: arm-linux-gnueabi
+          std: 20
+          heavybuild: 1
+          flags: -march=armv5te+fp
+        - arch: armv4
+          tc: arm-linux-gnueabi
+          std: 11
+          heavybuild: 0
+          flags: -march=armv4
+        - arch: armv4
+          tc: arm-linux-gnueabi
+          std: 20
+          heavybuild: 1
+          flags: -march=armv4
+        - arch: aarch64
+          tc: aarch64-linux-gnu
+          std: 11
+          heavybuild: 1
+        - arch: aarch64
+          tc: aarch64-linux-gnu
+          std: 20
+          heavybuild: 2
+        - arch: loongarch64
+          tc: loongarch64-linux-gnu
+          std: 11
+          heavybuild: 0
+          version: -14
+        - arch: loongarch64
+          tc: loongarch64-linux-gnu
+          std: 20
+          heavybuild: 1
+          version: -14
+        - arch: mips
+          tc: mips-linux-gnu
+          std: 11
+          heavybuild: 0
+        - arch: mips
+          tc: mips-linux-gnu
+          std: 20
+          heavybuild: 1
+        - arch: mipsel
+          tc: mipsel-linux-gnu
+          std: 11
+          heavybuild: 0
+        - arch: mipsel
+          tc: mipsel-linux-gnu
+          std: 20
+          heavybuild: 1
+        - arch: mips64
+          tc: mips64-linux-gnuabi64
+          std: 11
+          heavybuild: 2
+        - arch: mips64
+          tc: mips64-linux-gnuabi64
+          std: 20
+          heavybuild: 2
+        - arch: mips64el
+          tc: mips64el-linux-gnuabi64
+          std: 11
+          heavybuild: 2
+        - arch: mips64el
+          tc: mips64el-linux-gnuabi64
+          std: 20
+          heavybuild: 2
+        - arch: riscv64
+          tc: riscv64-linux-gnu
+          std: 11
+          heavybuild: 0
+        - arch: riscv64
+          tc: riscv64-linux-gnu
+          std: 20
+          heavybuild: 1
+        - arch: s390x
+          tc: s390x-linux-gnu
+          std: 11
+          heavybuild: 0
+        - arch: s390x
+          tc: s390x-linux-gnu
+          std: 20
+          heavybuild: 1
+        - arch: ppc
+          tc: powerpc-linux-gnu
+          std: 11
+          heavybuild: 0
+        - arch: ppc
+          tc: powerpc-linux-gnu
+          std: 20
+          heavybuild: 1
+        - arch: ppc64
+          tc: powerpc64-linux-gnu
+          std: 11
+          heavybuild: 0
+        - arch: ppc64
+          tc: powerpc64-linux-gnu
+          std: 20
+          heavybuild: 1
+        - arch: ppc64le
+          tc: powerpc64le-linux-gnu
+          std: 11
+          heavybuild: 0
+        - arch: ppc64le
+          tc: powerpc64le-linux-gnu
+          std: 20
+          heavybuild: 1
+        - arch: sparc64
+          tc: sparc64-linux-gnu
+          std: 11
+          heavybuild: 0
+        - arch: sparc64
+          tc: sparc64-linux-gnu
+          std: 20
+          heavybuild: 1
+    steps:
+    - name: checkout (action)
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - name: install
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+            gcc${{matrix.version}}-${{matrix.tc}} \
+            g++${{matrix.version}}-${{matrix.tc}} \
+            qemu-user-static
+    - name: info
+      run: |
+        ${{matrix.tc}}-g++${{matrix.version}} --version
+        ${{matrix.tc}}-g++${{matrix.version}} -dM -E - </dev/null | sort
+        ${{matrix.tc}}-g++${{matrix.version}} ${{matrix.flags}} -dM -E - </dev/null | sort
+    - name: '-------------------------------------------------'
+      run: echo ${{matrix.arch}}/c++${{matrix.std}}std/Debug
+    - name: configure ${{matrix.arch}}/c++${{matrix.std}}/Debug
+      run: |
+        touch build
+        rm -rf build
+        export C4_EXTERN_DIR=`pwd`/build/extern
+        cmake -S . -B build \
+            -DCMAKE_TOOLCHAIN_FILE=ext/c4core/.github/toolchains/${{matrix.arch}}.cmake \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS=" ${{matrix.flags}} " \
+            -DCMAKE_C_FLAGS=" ${{matrix.flags}} " \
+            -DC4_CXX_STANDARD=${{matrix.std}} \
+            -DCXX_STANDARD=${{matrix.std}} \
+            -DRYML_DEV=ON \
+            -DRYML_BUILD_BENCHMARKS=OFF \
+            -DRYML_SANITIZE=OFF \
+            -DRYML_LINT=OFF \
+            -DRYML_VALGRIND=OFF
+    - name: build ${{matrix.arch}}/c++${{matrix.std}}/Debug
+      run: |
+        numprocs=`nproc`
+        if [ ${{matrix.heavybuild}} == 2 ] ; then
+            if (( $numprocs > 1 )) ; then
+                numprocs=$(($numprocs / 2))
+            fi
+        fi
+        export CMAKE_BUILD_PARALLEL_LEVEL=$numprocs
+        cmake --build build --parallel $numprocs --target ryml-test-build
+    - name: test ${{matrix.arch}}/c++${{matrix.std}}/Debug
+      run: |
+        export CTEST_PARALLEL_LEVEL=`nproc`
+        cmake --build build --target ryml-test-run
+    - name: '-------------------------------------------------'
+      run: echo ${{matrix.arch}}/c++${{matrix.std}}std/Release
+    - name: configure ${{matrix.arch}}/c++${{matrix.std}}/Release
+      run: |
+        touch build
+        rm -rf build
+        export C4_EXTERN_DIR=`pwd`/build/extern
+        cmake -S . -B build \
+            -DCMAKE_TOOLCHAIN_FILE=ext/c4core/.github/toolchains/${{matrix.arch}}.cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_FLAGS=" ${{matrix.flags}} " \
+            -DCMAKE_C_FLAGS=" ${{matrix.flags}} " \
+            -DC4_CXX_STANDARD=${{matrix.std}} \
+            -DCXX_STANDARD=${{matrix.std}} \
+            -DRYML_DEV=ON \
+            -DRYML_BUILD_BENCHMARKS=OFF \
+            -DRYML_SANITIZE=OFF \
+            -DRYML_LINT=OFF \
+            -DRYML_VALGRIND=OFF
+    - name: build ${{matrix.arch}}/c++${{matrix.std}}/Release
+      run: |
+        numprocs=`nproc`
+        if [ ${{matrix.heavybuild}} != 0 ] ; then
+            if (( $numprocs > 1 )) ; then
+                numprocs=$(($numprocs / 2))
+            fi
+        fi
+        export CMAKE_BUILD_PARALLEL_LEVEL=$numprocs
+        cmake --build build --parallel $numprocs --target ryml-test-build
+    - name: test ${{matrix.arch}}/c++${{matrix.std}}/Release
+      run: |
+        export CTEST_PARALLEL_LEVEL=`nproc`
+        cmake --build build --target ryml-test-run

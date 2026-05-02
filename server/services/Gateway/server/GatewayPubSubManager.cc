@@ -86,7 +86,6 @@ GatewayPubSubManager::GatewayPubSubManager() {
                 auto it = LocalWebsockConnRoomhash.find(roomid);
 
                 if(it != LocalWebsockConnRoomhash.end()) {
-                    
                     t_uring_ptr->broadcastInLoop(it->second, shared_ws_frame);
                 }
             });

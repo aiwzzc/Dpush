@@ -7,6 +7,7 @@
 #include "GatewayServer.h"
 #include "chat_generated.h"
 #include "heartbeatManager.h"
+#include "config.h"
 
 #include <openssl/sha.h>
 #include <jwt.h>
@@ -138,7 +139,7 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
 
         client->rpcclearCursorsAsync(userid, [] () { return; });
 
-        client->rpcGetUserRoomListAsync(userid, "192.168.183.130:5005", 
+        client->rpcGetUserRoomListAsync(userid, Config::getInstance().addr_, 
             [userid, wsContextPtr, client] (std::vector<std::string>& roomlist) {
 
             if(roomlist.empty()) return;
@@ -229,6 +230,7 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
                         }
 
                         if(conns.empty()) {
+                            std::cout << "lose websocket\n";
                             LocalWebsockConnRoomhash.erase(it);
                             GatewayPubSubManager::UnSubscribeRoomSafe(roomid);
                         }
@@ -325,6 +327,7 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
                         }
 
                         client->rpcBathPullMessageAsync(message, [wsContextPtr] (const std::string& pulled_msg) {
+                            std::cout << pulled_msg.size() << std::endl;
                             wsContextPtr->send(buildWebSocketFrame(pulled_msg, 0x02));
                         });
 

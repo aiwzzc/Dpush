@@ -21,6 +21,7 @@ target_include_directories(GatewayServer PUBLIC
 ${CMAKE_SOURCE_DIR}/libs 
 ${CMAKE_BINARY_DIR}/proto 
 ${CMAKE_SOURCE_DIR}/libs/tools 
+${CMAKE_SOURCE_DIR}/libs/tools/rapidyaml 
 ${CMAKE_SOURCE_DIR}/libs/utils 
 ${CMAKE_CURRENT_SOURCE_DIR}/httpServer 
 ${CMAKE_BINARY_DIR}/fbs
@@ -60,6 +61,7 @@ PRIVATE
     etcd-cpp-api 
     cpprest 
     proto_gen  
+    ryml 
     ${JEMALLOC_LIBRARIES}
 )
 

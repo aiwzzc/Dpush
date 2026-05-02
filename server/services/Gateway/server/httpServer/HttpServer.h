@@ -72,8 +72,8 @@ public:
     using UpgradeCallback = std::function<void(const TcpConnectionPtr&, const HttpRequest&)>;
     using ThreadInitCallback = std::function<void(EventLoop*)>;
 
-    // HttpServer(const muduo::net::InetAddress &addr, const std::string& name, int num_event_loops);
-    HttpServer(uint16_t start_port, int port_count, const std::string& name, int total_event_loops);
+    HttpServer(const muduo::net::InetAddress &addr, const std::string& name, int num_event_loops);
+    // HttpServer(uint16_t start_port, int port_count, const std::string& name, int total_event_loops);
     ~HttpServer();
 
     static std::unordered_map<std::string, std::string> StaticFilesHash;
@@ -90,8 +90,8 @@ private:
     void defaultHttpCallback(const TcpConnectionPtr&, const HttpRequest&);
 
     std::unique_ptr<EventLoop> loop_;
-    // std::unique_ptr<TcpServer> server_;
-    std::vector<std::unique_ptr<TcpServer>> servers_;
+    std::unique_ptr<TcpServer> server_;
+    // std::vector<std::unique_ptr<TcpServer>> servers_;
     HttpCallback httpCallback_;
     UpgradeCallback upgradeCallback_;
 };

@@ -68,12 +68,17 @@ std::optional<int> WebsocketConn::getRoom_index(const std::string& room_id) cons
 }
 
 void WebsocketConn::SubscribeSession(const WebsocketConnPtr& wsContextPtr, const std::string& room_id) {
-    auto& conns = LocalWebsockConnRoomhash[room_id];
-    bool needSubscribeToRedisPub = conns.empty() ? true : false;
+    EventLoop* loop = wsContextPtr->getLoop();
 
-    wsContextPtr->joinRoom(room_id, conns.size());
-    conns.push_back(wsContextPtr);
-    if(needSubscribeToRedisPub) GatewayPubSubManager::SubscribeRoomSafe(room_id);
+    loop->runInLoop([wsContextPtr, room_id] () {
+        auto& conns = LocalWebsockConnRoomhash[room_id];
+        bool needSubscribeToRedisPub = conns.empty() ? true : false;
+
+        wsContextPtr->joinRoom(room_id, conns.size());
+        conns.push_back(wsContextPtr);
+
+        if(needSubscribeToRedisPub) GatewayPubSubManager::SubscribeRoomSafe(room_id);
+    });
 }
 
 const std::unordered_map<std::string, int>& WebsocketConn::getjoinedRooms() const

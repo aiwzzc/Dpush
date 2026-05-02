@@ -1,0 +1,88 @@
+!yamlscript/v0:
+
+:use common: :all
+:: workflow-setup()
+
+jobs:
+
+  #----------------------------------------------------------------------------
+  coverage:
+    :: setup-job('coverage' 'coverage')
+    name: cov/c++${{matrix.std}}/${{matrix.namesfx}}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        # test also with the debug code enabled
+        - {std: 11, namesfx: 32bit      , cmk: "-DCMAKE_CXX_FLAGS=-m32"}
+        - {std: 11, namesfx: 64bit      , cmk: "-DCMAKE_CXX_FLAGS=-m64"}
+        - {std: 11, namesfx: 64bit_no_ff, cmk: "-DCMAKE_CXX_FLAGS=-m64 -DC4CORE_WITH_FASTFLOAT=OFF"}
+        - {std: 17, namesfx: 32bit      , cmk: "-DCMAKE_CXX_FLAGS=-m32"}
+        - {std: 17, namesfx: 64bit      , cmk: "-DCMAKE_CXX_FLAGS=-m64"}
+        - {std: 17, namesfx: 64bit_no_ff, cmk: "-DCMAKE_CXX_FLAGS=-m64 -DC4CORE_WITH_FASTFLOAT=OFF"}
+    env:
+      GCC_VERSION: 13 # the default compiler
+      LCOV_ARGS: -v --ignore-errors mismatch,mismatch --ignore-errors unused,unused
+      BUILD_ID: cpp${{matrix.std}}_${{matrix.namesfx}}
+      CODECOV_TOKEN: ${{secrets.CODECOV_TOKEN}}
+    steps:
+    - :: checkout-action
+    - name: install compiler
+      run: |
+        sudo dpkg --add-architecture i386
+        sudo apt-get update
+        sudo apt-get install -y \
+            build-essential \
+            cmake \
+            git \
+            lcov \
+            linux-libc-dev:i386 \
+            libc6:i386 \
+            libc6-dev:i386 \
+            libc6-dbg:i386 \
+            g++-$GCC_VERSION \
+            g++-$GCC_VERSION-multilib
+    - name: show info
+      run: source .github/setenv.sh && c4_show_info
+    - name: configure
+      run: |
+        cmake -B build/$BUILD_ID \
+            -DCMAKE_BUILD_TYPE=Coverage \
+            -DC4CORE_BUILD_TESTS=ON \
+            -DC4CORE_COVERAGE_LCOV_ARGS=" $LCOV_ARGS " \
+            -DC4CORE_COVERAGE_CODECOV=ON \
+            ${{matrix.cmk}}
+    - name: build
+      run: |
+        cmake --build build/$BUILD_ID --verbose --target c4core-test-build --parallel
+    - name: run
+      run: |
+        cmake --build build/$BUILD_ID --verbose --target c4core-coverage
+    - name: upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-${{env.BUILD_ID}}
+        path: |
+          build/${{env.BUILD_ID}}/lcov-tmp/
+          build/${{env.BUILD_ID}}/lcov-tmp/result.lcov
+    - name: upload codecov
+      run: |
+        cmake --build build/$BUILD_ID --target c4core-coverage-submit-codecov --verbose
+    ## https://docs.coveralls.io/parallel-builds
+    #- name: upload coveralls
+    #  uses: coverallsapp/github-action@v2
+    #  with:
+    #    github-token: ${{secrets.COVERALLS_REPO_TOKEN}}
+    #    parallel: true
+    #    files: build/${{env.BUILD_ID}}/lcov-tmp/result.lcov
+
+  #coveralls_finish:
+  #  needs: coverage
+  #  if: ${{always()}}
+  #  runs-on: ubuntu-24.04
+  #  steps:
+  #  - name: Coveralls Finished
+  #    uses: coverallsapp/github-action@v2
+  #    with:
+  #      parallel-finished: true

@@ -4,8 +4,10 @@
 
 int main(int argc, char* argv[]) {
 
-    // Config& config = Config::getInstance();
-    // config.Parser(argv[1]);
+    if(argc < 2) return -1;
+
+    Config& config = Config::getInstance();
+    config.Parser(argv[1]);
 
     muduo::Logger::setLogLevel(muduo::Logger::FATAL);
 

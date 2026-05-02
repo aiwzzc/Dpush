@@ -311,7 +311,7 @@ void grpcClient::rpcPullMessageAsync(int64_t roomid, std::string& roomname, cons
 
     request->set_roomid(roomid);
     request->set_roomname(roomname);
-    request->set_messageid(0);
+    request->set_messageid(-1);
 
     this->Logicstub->async()->pullMessage(ctx.get(), request.get(), response.get(),
     [ctx, request, response, callback = std::move(callback)] (grpc::Status s) {

@@ -23,24 +23,26 @@ static std::string readFile(const std::string& filePath) {
     return buffer.str();
 }
 
-// HttpServer::HttpServer(const muduo::net::InetAddress &addr, const std::string& name, int num_event_loops):
-//     loop_(std::make_unique<EventLoop>()), 
-//     server_(std::make_unique<TcpServer>(this->loop_.get(), addr, name, TcpServer::kReusePort)) {
-//     this->server_->setMessageCallback([this] (const TcpConnectionPtr& conn, muduo::net::Buffer* buf, muduo::Timestamp) {
-//         onMessage(conn, buf->retrieveAsString(buf->readableBytes()));
-//     });
+HttpServer::HttpServer(const muduo::net::InetAddress &addr, const std::string& name, int num_event_loops):
+    loop_(std::make_unique<EventLoop>()), 
+    server_(std::make_unique<TcpServer>(this->loop_.get(), addr, name, TcpServer::kReusePort)) {
 
-//     this->server_->setConnectionCallback([this] (const TcpConnectionPtr& conn) { onConnection(conn); });
-//     setHttpCallback([this] (const TcpConnectionPtr& conn, const HttpRequest& req) { defaultHttpCallback(conn, req); });
+    this->server_->setMessageCallback([this] (const TcpConnectionPtr& conn, muduo::net::Buffer* buf, muduo::Timestamp) {
+        onMessage(conn, buf);
+    });
 
-//     this->server_->setThreadNum(num_event_loops);
+    this->server_->setConnectionCallback([this] (const TcpConnectionPtr& conn) { onConnection(conn); });
+    setHttpCallback([this] (const TcpConnectionPtr& conn, const HttpRequest& req) { defaultHttpCallback(conn, req); });
 
-//     this->server_->setThreadInitCallback([] (EventLoop* loop) {
-//         GatewayPubSubManager::RegisterLoop(loop);
-//     });
+    this->server_->setThreadNum(num_event_loops);
 
-// }
+    this->server_->setThreadInitCallback([] (EventLoop* loop) {
+        GatewayPubSubManager::RegisterLoop(loop);
+    });
 
+}
+
+#if 0
 HttpServer::HttpServer(uint16_t start_port, int port_count, const std::string& name, int total_event_loops):
     loop_(std::make_unique<EventLoop>()) {
 
@@ -70,14 +72,16 @@ HttpServer::HttpServer(uint16_t start_port, int port_count, const std::string& n
         defaultHttpCallback(conn, req); 
     });
 }
+#endif
 
 HttpServer::~HttpServer() = default;
 
-// void HttpServer::start() {
-//     this->server_->start();
-//     this->loop_->loop(1000);
-// }
+void HttpServer::start() {
+    this->server_->start();
+    this->loop_->loop(1000);
+}
 
+#if 0
 void HttpServer::start() {
     for (auto& server : servers_) {
         server->start();
@@ -85,6 +89,7 @@ void HttpServer::start() {
 
     this->loop_->loop(1000);
 }
+#endif
 
 void HttpServer::setHttpCallback(const HttpCallback& cb)
 { this->httpCallback_ = std::move(cb); }
@@ -93,9 +98,13 @@ void HttpServer::setUpgradeCallback(const UpgradeCallback& cb)
 { this->upgradeCallback_ = std::move(cb); }
 
 void HttpServer::setThreadInitCallback(const ThreadInitCallback& cb) {
+#if 0
     for(auto& server : servers_) {
         server->setThreadInitCallback(cb);
     }
+#endif
+
+    this->server_->setThreadInitCallback(cb);
 }
 
 void HttpServer::onConnection(const TcpConnectionPtr& conn) {
