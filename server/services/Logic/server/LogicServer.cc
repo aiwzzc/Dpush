@@ -1,7 +1,9 @@
 #include "LogicServer.h"
 
 LogicServer::LogicServer() {
-    this->mysql_cluster_ = std::make_unique<asyncMysqlCluster>(4, 10);
+    mysql_info info{"127.0.0.1", "3306", "chatroom", "root", "zzc1109aiw"};
+
+    this->mysql_cluster_ = std::make_unique<asyncMysqlCluster>(4, 10, info);
 
     sw::redis::ConnectionOptions connection_options;
     connection_options.host = "127.0.0.1";
@@ -9,7 +11,7 @@ LogicServer::LogicServer() {
     connection_options.db = 1;
 
     sw::redis::ConnectionPoolOptions pool_options;
-    pool_options.size = 2;
+    pool_options.size = 12;
 
     this->redisPool_ = std::make_unique<sw::redis::Redis>(connection_options, pool_options);
 

@@ -20,15 +20,15 @@ asyncMysqlConn* mysqlConnGuard::operator->()
 asyncMysqlConn::asyncMysqlConn(asyncMysqlConnPool* pool) : 
 pool_(pool) {}
 
-boost::asio::awaitable<void> asyncMysqlConn::async_open() {
+boost::asio::awaitable<void> asyncMysqlConn::async_open(const mysql_info& info) {
     auto executor = co_await asio::this_coro::executor;
 
     this->conn_ = std::make_shared<mysql::tcp_connection>(executor);
 
     asio::ip::tcp::resolver resolver(executor);
-    auto endpoints = co_await resolver.async_resolve("127.0.0.1", "3306", asio::use_awaitable);
+    auto endpoints = co_await resolver.async_resolve(info.ip, info.port, asio::use_awaitable);
 
-    mysql::handshake_params params("root", "zzc1109aiw", "chatroom");
+    mysql::handshake_params params(info.user, info.password, info.dbname);
    
     co_await this->conn_->async_connect(*endpoints.begin(), params, asio::use_awaitable);
 }

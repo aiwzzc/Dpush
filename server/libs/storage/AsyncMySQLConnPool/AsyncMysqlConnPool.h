@@ -6,18 +6,29 @@
 #include <thread>
 #include <mutex>
 #include <vector>
+#include <string>
 
 #include <boost/asio.hpp>
 #include <boost/asio/steady_timer.hpp>
 
 #include "AsyncMysqlConn.h"
 
+struct mysql_info {
+
+    std::string ip;
+    std::string port;
+    std::string dbname;
+    std::string user;
+    std::string password;
+
+};
+
 class asyncMysqlConnPool {
 
 public:
     using asyncMysqlConnPtr = std::shared_ptr<asyncMysqlConn>;
 
-    asyncMysqlConnPool(boost::asio::io_context& ioc, int max_conn);
+    asyncMysqlConnPool(boost::asio::io_context& ioc, int max_conn, const mysql_info& info);
     ~asyncMysqlConnPool();
 
     boost::asio::awaitable<asyncMysqlConnPtr> Acquire();
@@ -25,6 +36,7 @@ public:
     boost::asio::io_context* get_ioc() const;
 
 private:
+    mysql_info meta_info_;
 
     boost::asio::io_context& ioc_;
 

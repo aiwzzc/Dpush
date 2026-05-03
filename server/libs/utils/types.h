@@ -49,6 +49,12 @@ struct RoomDataCache {
     MessageBatch msgs;
 };
 
+struct GatewayLoad {
+    int32_t conn_count;     // 当前连接数（权重 70%）
+    // int32_t cpu_usage;      // 当前 CPU 使用率百分比 0-100（权重 30%）
+    uint64_t update_time;    // 存入 Redis 的时间戳（用来剔除过期脏数据）
+};
+
 std::string buildWebSocketFrame(const std::string& payload, uint8_t opcode = 0x01);
 
 /*

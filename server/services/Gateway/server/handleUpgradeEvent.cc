@@ -241,6 +241,7 @@ void handleUpgradeEvent(const TcpConnectionPtr& conn, const HttpRequest& req, co
         });
 
         conn->setContext(wsContextPtr);
+        GatewayServer::conned_count_.fetch_add(1, std::memory_order_relaxed);
 
 #if 0
         {

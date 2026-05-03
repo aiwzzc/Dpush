@@ -78,6 +78,13 @@ HttpServer::~HttpServer() = default;
 
 void HttpServer::start() {
     this->server_->start();
+
+    this->loop_->runEvery(3, [this] () {
+        if(this->mainLoopTimerCallback_) {
+            this->mainLoopTimerCallback_();
+        }
+    });
+
     this->loop_->loop(1000);
 }
 
@@ -105,6 +112,10 @@ void HttpServer::setThreadInitCallback(const ThreadInitCallback& cb) {
 #endif
 
     this->server_->setThreadInitCallback(cb);
+}
+
+void HttpServer::setMainLoopTimerCallback(const MainLoopTimerCallback& cb) {
+    this->mainLoopTimerCallback_ = std::move(cb);
 }
 
 void HttpServer::onConnection(const TcpConnectionPtr& conn) {

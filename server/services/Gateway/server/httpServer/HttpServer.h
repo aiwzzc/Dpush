@@ -71,6 +71,7 @@ public:
     using HttpCallback = std::function<void(TcpConnectionPtr conn, HttpRequest)>;
     using UpgradeCallback = std::function<void(const TcpConnectionPtr&, const HttpRequest&)>;
     using ThreadInitCallback = std::function<void(EventLoop*)>;
+    using MainLoopTimerCallback = std::function<void()>;
 
     HttpServer(const muduo::net::InetAddress &addr, const std::string& name, int num_event_loops);
     // HttpServer(uint16_t start_port, int port_count, const std::string& name, int total_event_loops);
@@ -82,6 +83,7 @@ public:
     void setHttpCallback(const HttpCallback& cb);
     void setUpgradeCallback(const UpgradeCallback& cb);
     void setThreadInitCallback(const ThreadInitCallback& cb);
+    void setMainLoopTimerCallback(const MainLoopTimerCallback& cb);
 
 private:
     void onConnection(const TcpConnectionPtr& conn);
@@ -94,4 +96,5 @@ private:
     // std::vector<std::unique_ptr<TcpServer>> servers_;
     HttpCallback httpCallback_;
     UpgradeCallback upgradeCallback_;
+    MainLoopTimerCallback mainLoopTimerCallback_;
 };

@@ -4,8 +4,8 @@
 #include <boost/asio/redirect_error.hpp>
 #include <boost/system/error_code.hpp>
 
-asyncMysqlConnPool::asyncMysqlConnPool(boost::asio::io_context& ioc, int max_conn)
-: ioc_(ioc), max_connections_(max_conn), active_connections_(0) 
+asyncMysqlConnPool::asyncMysqlConnPool(boost::asio::io_context& ioc, int max_conn, const mysql_info& info)
+: meta_info_(std::move(info)), ioc_(ioc), max_connections_(max_conn), active_connections_(0) 
 {}
 
 asyncMysqlConnPool::~asyncMysqlConnPool() = default;
@@ -30,7 +30,7 @@ boost::asio::awaitable<asyncMysqlConnPool::asyncMysqlConnPtr> asyncMysqlConnPool
 
     if(need_create) {
         conn = std::make_shared<asyncMysqlConn>(this);
-        co_await conn->async_open();
+        co_await conn->async_open(this->meta_info_);
 
         co_return conn;
     }

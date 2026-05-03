@@ -6,13 +6,14 @@
 #include <string>
 
 class asyncMysqlConnPool;
+struct mysql_info;
 
 class asyncMysqlConn {
 
 public:
     asyncMysqlConn(asyncMysqlConnPool* pool);
 
-    boost::asio::awaitable<void> async_open();
+    boost::asio::awaitable<void> async_open(const mysql_info& info);
     boost::asio::awaitable<void> ping();
     boost::asio::awaitable<boost::mysql::results> acquire(const std::string& sql);
     boost::asio::awaitable<boost::mysql::results> execute(const std::string& sql);

@@ -9,7 +9,7 @@
 #include "chat_generated.h"
 
 KafkaConsumer::KafkaConsumer(const std::string& brokers, const std::string& group_id, 
-    std::vector<std::string> topics, OrderedThreadPool* ordthreadpool, 
+    const std::vector<std::string>& topics, OrderedThreadPool* ordthreadpool, 
     ComputeThreadPool* comthreadpool, sw::redis::Redis* redis_pool) : 
     OrderedThreadPool_(ordthreadpool), ComputeThreadPool_(comthreadpool), redis_pool_(redis_pool), running_(true) {
 
@@ -37,7 +37,7 @@ KafkaConsumer::KafkaConsumer(const std::string& brokers, const std::string& grou
 
     delete conf;
 
-    RdKafka::ErrorCode err = this->consumer_->subscribe(topics);
+    RdKafka::ErrorCode err = this->consumer_->subscribe(std::move(topics));
 
     if(err != RdKafka::ERR_NO_ERROR) {
         throw std::runtime_error("Failed to subscribe: " + RdKafka::err2str(err));
@@ -116,13 +116,14 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
         return;
     }
 
-    int32_t userid;
+    int32_t userid; std::string userid_str;
     std::string username;
 
     auto header_list = header->get_all();
     for(const auto& hdr : header_list) {
         if(hdr.key() == "userid") {
-            userid = std::stoi(std::string(static_cast<const char*>(hdr.value()), hdr.value_size()));
+            userid_str = std::string(static_cast<const char*>(hdr.value()), hdr.value_size());
+            userid = std::stoi(userid_str);
 
         } else if(hdr.key() == "username") {
             username.assign(std::string(static_cast<const char*>(hdr.value()), hdr.value_size()));
@@ -202,7 +203,7 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
 
         } else if(chat_type == ChatApp::ChatType::ChatType_Single) {
 
-            std::string sender_route_key = "{route:uid:" + std::to_string(userid) + "}";
+            std::string sender_route_key = "{route:uid:" + userid_str + "}";
             std::string target_route_key = "{route:uid:" + std::string(target_id) + "}";
 
             pipe.get(sender_route_key);
