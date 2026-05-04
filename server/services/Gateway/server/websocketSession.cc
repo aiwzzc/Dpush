@@ -1,4 +1,4 @@
-#include "websocketConn.h"
+#include "websocketSession.h"
 #include "GatewayPubSubManager.h"
 #include "chat_generated.h"
 
@@ -9,82 +9,93 @@
 #include <mutex>
 #include <vector>
 
-WebsocketConn::WebsocketConn(const TcpConnectionPtr& conn) : conn_(conn) {}
+WsSession::WsSession(const TcpConnectionPtr& conn) : 
+conn_(conn), state_(WsState::EXPECTING_HTTP_REQUEST) {}
 
-WebsocketConn::~WebsocketConn() = default;
+WsSession::~WsSession() {
+    if(this->webconnCloseCallback_) this->webconnCloseCallback_();
+}
 
-void WebsocketConn::setUserid(int32_t userid) 
+void WsSession::setUserid(int32_t userid) 
 { this->userid_ = userid; }
 
-void WebsocketConn::setUsername(const std::string& username) 
+void WsSession::setUsername(const std::string& username) 
 { this->username_.assign(username); }
 
-void WebsocketConn::setjoinedRooms(const std::unordered_map<std::string, int>& rooms)
+void WsSession::setjoinedRooms(const std::unordered_map<std::string, int>& rooms)
 { this->joinedRooms_ = std::move(rooms); }
 
-std::string& WebsocketConn::username() 
+std::string& WsSession::username() 
 { return this->username_; }
 
-int32_t WebsocketConn::userid() const 
+int32_t WsSession::userid() const 
 { return this->userid_; }
 
-EventLoop* WebsocketConn::getLoop() const 
-{ return this->conn_->getLoop(); }
+EventLoop* WsSession::getLoop() const { 
+    auto conn = this->conn_.lock();
 
-void WebsocketConn::forceClose()
-{ this->conn_->forceClose(); }
+    return conn ? conn->getLoop() : nullptr;
+}
 
-void WebsocketConn::setWebconnCloseCallback(const WebconnCloseCallback& cb) 
+void WsSession::forceClose() {
+    auto conn = this->conn_.lock();
+
+    if(conn) {
+        conn->forceClose();
+    }
+}
+
+void WsSession::setWebconnCloseCallback(const WebconnCloseCallback& cb) 
 { this->webconnCloseCallback_ = std::move(cb); }
 
-void WebsocketConn::setContext(const std::any& context)
+void WsSession::setContext(const std::any& context)
 { this->context_ = context; }
 
-const std::any& WebsocketConn::getContext() const 
+const std::any& WsSession::getContext() const 
 { return this->context_; }
 
-std::any* WebsocketConn::getMutableContext()
+std::any* WsSession::getMutableContext()
 { return &this->context_; }
 
-void WebsocketConn::setRoomIndex(const std::string& room_id, int new_index) {
+void WsSession::setRoomIndex(const std::string& room_id, int new_index) {
     auto it = this->joinedRooms_.find(room_id);
     if(it == this->joinedRooms_.end()) return;
 
     this->joinedRooms_[room_id] = new_index;
 }
 
-void WebsocketConn::joinRoom(const std::string& room_id, int new_index) {
+void WsSession::joinRoom(const std::string& room_id, int new_index) {
     auto it = this->joinedRooms_.find(room_id);
     if(it != this->joinedRooms_.end()) return;
 
     this->joinedRooms_[room_id] = new_index;
 }
 
-std::optional<int> WebsocketConn::getRoom_index(const std::string& room_id) const {
+std::optional<int> WsSession::getRoom_index(const std::string& room_id) const {
     auto it = this->joinedRooms_.find(room_id);
     if(it == this->joinedRooms_.end()) return std::nullopt;
 
     return it->second;
 }
 
-void WebsocketConn::SubscribeSession(const WebsocketConnPtr& wsContextPtr, const std::string& room_id) {
-    EventLoop* loop = wsContextPtr->getLoop();
+void WsSession::SubscribeSession(const WsSessionPtr& wsSessionPtr, const std::string& room_id) {
+    EventLoop* loop = wsSessionPtr->getLoop();
 
-    loop->runInLoop([wsContextPtr, room_id] () {
+    loop->runInLoop([wsSessionPtr, room_id] () {
         auto& conns = LocalWebsockConnRoomhash[room_id];
         bool needSubscribeToRedisPub = conns.empty() ? true : false;
 
-        wsContextPtr->joinRoom(room_id, conns.size());
-        conns.push_back(wsContextPtr);
+        wsSessionPtr->joinRoom(room_id, conns.size());
+        conns.push_back(wsSessionPtr);
 
         if(needSubscribeToRedisPub) GatewayPubSubManager::SubscribeRoomSafe(room_id);
     });
 }
 
-const std::unordered_map<std::string, int>& WebsocketConn::getjoinedRooms() const
+const std::unordered_map<std::string, int>& WsSession::getjoinedRooms() const
 { return this->joinedRooms_; }
 
-void WebsocketConn::sendCloseFrame(uint16_t code, const std::string reason) {
+void WsSession::sendCloseFrame(uint16_t code, const std::string reason) {
     size_t payload_len = 2 + reason.size();
     if (payload_len > 125) {
         payload_len = 125;
@@ -112,13 +123,20 @@ void WebsocketConn::sendCloseFrame(uint16_t code, const std::string reason) {
 
     // 注意：这里强转回 char* 传给底层的 send
 
-    this->conn_->send(reinterpret_cast<const char*>(frame.data()), frame.size());
+    auto conn = this->conn_.lock();
+    if(conn) conn->send(reinterpret_cast<const char*>(frame.data()), frame.size());
 }
 
-bool WebsocketConn::connected() { return this->conn_->connected(); }
+bool WsSession::connected() {
+    auto conn = this->conn_.lock();
 
-void WebsocketConn::disconnect() {
-    if(this->conn_->disconnected()) return;
+    return conn->connected();
+}
+
+void WsSession::disconnect() {
+    auto conn = this->conn_.lock();
+
+    if(!conn || conn->disconnected()) return;
 
     sendCloseFrame(1000, "Normal Close");
 
@@ -137,20 +155,29 @@ void WebsocketConn::disconnect() {
     }
 }
 
-void WebsocketConn::sendPongFrame() {}
-bool WebsocketConn::isCloseFrame() 
+void WsSession::sendPongFrame() {}
+bool WsSession::isCloseFrame() 
 { return true; }
 
-void WebsocketConn::send(const std::string& msg) 
-{ this->conn_->send(msg.c_str(), msg.size()); }
+void WsSession::send(const std::string& msg) {
+    auto conn = this->conn_.lock();
 
-void WebsocketConn::send(const char* msg, std::size_t len) 
-{ this->conn_->send(msg, len); }
+    if(conn) conn->send(msg.c_str(), msg.size());
+}
 
-TcpConnectionPtr WebsocketConn::conn() const
-{ return this->conn_; }
+void WsSession::send(const char* msg, std::size_t len) {
+    auto conn = this->conn_.lock();
 
-std::vector<std::string> WebsocketConn::onRead(const TcpConnectionPtr& conn, muduo::net::Buffer* buf) {
+    if(conn) conn->send(msg, len);
+}
+
+TcpConnectionPtr WsSession::conn() const {
+    auto conn = this->conn_.lock();
+
+    return conn ? conn : nullptr;
+}
+
+std::vector<std::string> WsSession::onRead(const TcpConnectionPtr& conn, muduo::net::Buffer* buf) {
     if(conn->disconnected()) return {};
 
     std::vector<std::string> messageList;

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "cpp-httplib/httplib.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -12,8 +11,15 @@
 
 #include <etcd/Client.hpp>
 #include <etcd/Watcher.hpp>
-
 #include <sw/redis++/redis++.h>
+
+#include "httpServer/HttpServer.h"
+#include "auth.grpc.pb.h"
+#include "auth.pb.h"
+#include "coroutineTask.h"
+
+class HttpRequest;
+class HttpResponse;
 
 struct GatewayInfo {
     int score;
@@ -30,15 +36,22 @@ public:
 
 private:
     void BackendSyncTask();
-    void etcdWatcherCallback(const etcd::Response& response);
-    void httpEventCallback(const httplib::Request& req, httplib::Response& res);
+    void onetcdWatcher(const etcd::Response& response);
+    DetachedTask onDispatch(const TcpConnectionPtr& conn, const HttpRequest& req);
+    DetachedTask onLogin(const TcpConnectionPtr& conn, const HttpRequest& req);
+    DetachedTask onRegister(const TcpConnectionPtr& conn, const HttpRequest& req);
+    DetachedTask onjoinSession(const TcpConnectionPtr& conn, const HttpRequest& req);
+    DetachedTask oncreateSession(const TcpConnectionPtr& conn, const HttpRequest& req);
 
     std::string etcd_url_;
     std::string watch_prefix_{"/services/gateway/"};
 
     std::shared_ptr<etcd::Client> etcd_client_;
     std::unique_ptr<etcd::Watcher> etcd_watcher_;
-    std::unique_ptr<httplib::Server> server_;
+    std::unique_ptr<HttpServer> server_;
+
+    std::shared_ptr<grpc::Channel> Authchannel;
+    std::unique_ptr<auth::AuthServer::Stub> Authstub;
 
     std::unordered_set<std::string> etcd_conns_;
     std::shared_mutex etcd_conns_mutex_;

@@ -46,7 +46,7 @@ bool HttpContext::processRequestLine(const char* begin, const char* end) {
 
     return succeed;
 }
-#include <iostream>
+
 bool HttpContext::parseRequest(muduo::net::Buffer* buf) {
     bool ok{true};
     bool hasMore{true};

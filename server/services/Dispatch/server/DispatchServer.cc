@@ -1,10 +1,20 @@
 #include "DispatchServer.h"
 #include "yyjson/JsonView.h"
 
+#include "httpServer/HttpRequest.h"
+#include "httpServer/HttpResponse.h"
+
+#include "muduo/net/InetAddress.h"
+#include <grpcpp/grpcpp.h>
+#include <coroutine>
+
 dispatchServer::dispatchServer(const std::string& etcd_url) :
 etcd_url_(etcd_url) {
     this->etcd_client_ = std::make_shared<etcd::Client>(this->etcd_url_);
-    this->server_ = std::make_unique<httplib::Server>();
+    this->server_ = std::make_unique<HttpServer>(muduo::net::InetAddress{"0.0.0.0", 5001}, "HttpServer", 6);
+
+    this->Authchannel = grpc::CreateChannel("127.0.0.1:5006", grpc::InsecureChannelCredentials());
+    this->Authstub = auth::AuthServer::NewStub(this->Authchannel);
 
     sw::redis::ConnectionOptions connection_options;
     connection_options.host = "127.0.0.1";
@@ -53,7 +63,7 @@ void dispatchServer::BackendSyncTask() {
     }
 }
 
-void dispatchServer::etcdWatcherCallback(const etcd::Response& response) {
+void dispatchServer::onetcdWatcher(const etcd::Response& response) {
     for(const auto& event : response.events()) {
         std::string key = event.kv().key();
 
@@ -74,15 +84,39 @@ void dispatchServer::etcdWatcherCallback(const etcd::Response& response) {
     }
 }
 
-void dispatchServer::httpEventCallback(const httplib::Request& req, httplib::Response& res) {
+static bool req_is_close(const HttpRequest& req) {
+    auto connection_opt = req.getHeader("Connection");
+
+    const std::string& connection = connection_opt.has_value() ? *(connection_opt.value()) : "";
+    bool close = connection == "close" ||
+        (req.version() == HttpRequest::Version::kHttp10 && connection != "Keep-Alive");
+
+    return close;
+}
+
+static void sendRes(const TcpConnectionPtr& conn, HttpResponse& res) {
+    std::string output;
+    res.appendToBuffer(output);
+    conn->send(output);
+    if (res.closeConnection()) {
+        conn->shutdown();
+    }
+}
+
+DetachedTask dispatchServer::onDispatch(const TcpConnectionPtr& conn, const HttpRequest& req) {
+    bool close = req_is_close(req);
+    HttpResponse res(close);
+
     std::vector<std::string> valid_urls;
 
     {
         std::shared_lock<std::shared_mutex> lock(this->cache_mutex_);
 
         if (this->cached_gateways_.empty()) {
-            res.status = 503;
-            res.set_content(R"({"error": "No gateways available"})", "application/json");
+            res.setStatusCode(HttpResponse::HttpStatusCode::K503ServiceUnavailable);
+            res.setContentType("application/json");
+            res.setBody(R"({"error": "No gateways available"})");
+
             return;
         }
 
@@ -110,7 +144,60 @@ void dispatchServer::httpEventCallback(const httplib::Request& req, httplib::Res
     }
     res_json += "]}";
 
-    res.set_content(res_json, "application/json");
+    res.setContentType("application/json");
+    res.setBody(res_json);
+    sendRes(conn, res);
+}
+
+struct AuthLoginAwaiter {
+
+    auth::AuthServer::Stub* auth_stub_;
+    std::function<void()> callback_;
+
+    bool await_ready() const noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> handle) {
+        auto loop = muduo::net::EventLoop::getEventLoopOfCurrentThread(); 
+
+        auto context = std::make_shared<grpc::ClientContext>();
+        auto request = std::make_shared<auth::LoginRequest>();
+        auto response = std::make_shared<auth::LoginResponse>();
+
+        this->auth_stub_->async()->Login(context.get(), request.get(), response.get(), 
+        [handle, loop, context, request, response, callback = std::move(callback_)] (grpc::Status ok) {
+            if(ok.ok()) {
+                callback();
+                
+                loop->runInLoop([handle] () {
+                    handle.resume();
+                });
+            }
+        });
+    }
+
+    void await_resume() {};
+};
+
+AuthLoginAwaiter async_authLogin_coro(auth::AuthServer::Stub* stub, const std::function<void()>& callback) {
+    return AuthLoginAwaiter{stub, std::move(callback)};
+}
+
+DetachedTask dispatchServer::onLogin(const TcpConnectionPtr& conn, const HttpRequest& req) {
+    bool close = req_is_close(req);
+    HttpResponse res(close);
+
+    co_await async_authLogin_coro(this->Authstub.get(), [] () {});
+}
+
+DetachedTask dispatchServer::onRegister(const TcpConnectionPtr& conn, const HttpRequest& req) {
+
+}
+
+DetachedTask dispatchServer::onjoinSession(const TcpConnectionPtr& conn, const HttpRequest& req) {
+
+}
+
+DetachedTask dispatchServer::oncreateSession(const TcpConnectionPtr& conn, const HttpRequest& req) {
+
 }
 
 void dispatchServer::start() {
@@ -130,7 +217,7 @@ void dispatchServer::start() {
         this->etcd_url_,
         this->watch_prefix_,
         [this] (const etcd::Response& response) {
-            this->etcdWatcherCallback(response);
+            this->onetcdWatcher(response);
         },
         true
     );
@@ -139,9 +226,30 @@ void dispatchServer::start() {
         this->BackendSyncTask();
     });
 
-    this->server_->Get("/get_gateway", [this] (const httplib::Request& req, httplib::Response& res) {
-        this->httpEventCallback(req, res);
+    this->server_->GetAsync("/api/get_gateway", 
+    [this] (const TcpConnectionPtr& conn, const HttpRequest& req) -> DetachedTask {
+        this->onDispatch(conn, req);
     });
 
-    this->server_->listen("192.168.183.130", 5000);
+    this->server_->GetAsync("/api/login", 
+    [this] (const TcpConnectionPtr& conn, const HttpRequest& req) -> DetachedTask {
+        this->onLogin(conn, req);
+    });
+
+    this->server_->GetAsync("/api/reg", 
+    [this] (const TcpConnectionPtr& conn, const HttpRequest& req) -> DetachedTask {
+        this->onRegister(conn, req);
+    });
+
+    this->server_->GetAsync("/api/joinsession", 
+    [this] (const TcpConnectionPtr& conn, const HttpRequest& req) -> DetachedTask {
+        this->onjoinSession(conn, req);
+    });
+
+    this->server_->GetAsync("/api/createsession", 
+    [this] (const TcpConnectionPtr& conn, const HttpRequest& req) -> DetachedTask {
+        this->oncreateSession(conn, req);
+    });
+
+    this->server_->start();
 }

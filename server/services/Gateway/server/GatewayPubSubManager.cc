@@ -1,15 +1,16 @@
 #include "GatewayPubSubManager.h"
-#include "websocketConn.h"
+#include "websocketSession.h"
 #include "iouring.h"
+#include "types.h"
 
-std::unordered_map<int32_t, WebsocketConnPtr> GatewayPubSubManager::WebsockConnhash{};
+std::unordered_map<int32_t, WsSessionPtr> GatewayPubSubManager::WebsockConnhash{};
 std::mutex GatewayPubSubManager::WebsockConnhashMutex{};
 
 std::array<RoomBucket, BUCKET_NUM> GatewayPubSubManager::roomBuckets{};
 
 // 无锁优化
-thread_local std::unordered_map<int32_t, WebsocketConnPtr> LocalWebsockConnhash;
-thread_local std::unordered_map<std::string, std::vector<WebsocketConnPtr>> LocalWebsockConnRoomhash;
+thread_local std::unordered_map<int32_t, WsSessionPtr> LocalWebsockConnhash;
+thread_local std::unordered_map<std::string, std::vector<WsSessionPtr>> LocalWebsockConnRoomhash;
 
 thread_local std::unique_ptr<ThreadLocalUring> t_uring_ptr = nullptr;
 
@@ -100,7 +101,7 @@ GatewayPubSubManager::GatewayPubSubManager() {
     this->consume_thread_ = std::thread(&GatewayPubSubManager::ConsumLoop, this);
 }
 
-void GatewayPubSubManager::sendInBatches(EventLoop* loop, std::shared_ptr<std::vector<WebsocketConnPtr>> conns,
+void GatewayPubSubManager::sendInBatches(EventLoop* loop, std::shared_ptr<std::vector<WsSessionPtr>> conns,
     int start_idx, std::shared_ptr<std::string> message) {
     
     int end_idx = std::min(start_idx + GatewayPubSubManager::batch_size, (int)conns->size());

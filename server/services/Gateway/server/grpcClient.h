@@ -54,14 +54,14 @@ public:
     RoomStub(room::RoomServer::NewStub(this->Roomchannel)) {}
     ~grpcClient() = default;
 
-    void rpcLoginAsync(const HttpRequest&, int& errcode, std::string& errmsg, std::function<void(LogicInfo)>);
-    void rpcRegisterAsync(const HttpRequest&, int& errcode, std::string& errmsg, std::function<void(RegisterInfo)>);
+    // void rpcLoginAsync(const HttpRequest&, int& errcode, std::string& errmsg, std::function<void(LogicInfo)>);
+    // void rpcRegisterAsync(const HttpRequest&, int& errcode, std::string& errmsg, std::function<void(RegisterInfo)>);
     void rpcCilentMessageAsync(const std::string& message, int32_t userid, std::string username, 
     std::function<void(std::string)> callback);
     void rpcclearCursorsAsync(int32_t userid, std::function<void()>);
     void rpcGetUserRoomListAsync(int32_t userid, const std::string& addr, const std::function<void(std::vector<std::string>&)>&);
-    void rpcJoinSessionAsync(int32_t userid, const std::string& roomname, const std::function<void(int, const std::string&, int64_t)>&);
-    void rpcCreateSessionAsync(int32_t userid, const std::string& roomname, const std::function<void(int32_t, const std::string&, int64_t)>&);
+    // void rpcJoinSessionAsync(int32_t userid, const std::string& roomname, const std::function<void(int, const std::string&, int64_t)>&);
+    // void rpcCreateSessionAsync(int32_t userid, const std::string& roomname, const std::function<void(int32_t, const std::string&, int64_t)>&);
     void rpcJoinRooms(int32_t userid, std::vector<std::string>& rooms);
     void rpcBathPullMessageAsync(const std::string& message, std::function<void(const std::string&)> callback);
     void rpcIsSubSessionAsync(int32_t userid, std::string& room_id, const std::function<void(const std::string&)>& callback);

@@ -1,8 +1,5 @@
 #include "grpcClient.h"
 
-#include "httpServer/HttpResponse.h"
-#include "httpServer/HttpRequest.h"
-
 #include "yyjson/JsonView.h"
 
 std::string grpcClient::api_error_id_to_string(api_error_id id) {
@@ -47,82 +44,82 @@ std::optional<grpcClient::api_error_id> grpcClient::to_api_error_id(int v) {
     }
 }
 
-void grpcClient::rpcLoginAsync(const HttpRequest& req, int& errcode, std::string& errmsg, 
-    std::function<void(LogicInfo)> callback) {
+// void grpcClient::rpcLoginAsync(const HttpRequest& req, int& errcode, std::string& errmsg, 
+//     std::function<void(LogicInfo)> callback) {
 
-    auto context = std::make_shared<ClientContext>();
-    auto request = std::make_shared<auth::LoginRequest>();
-    auto response = std::make_shared<auth::LoginResponse>();
+//     auto context = std::make_shared<ClientContext>();
+//     auto request = std::make_shared<auth::LoginRequest>();
+//     auto response = std::make_shared<auth::LoginResponse>();
 
-    JsonDoc root;
+//     JsonDoc root;
 
-    if (!root.parse(req.body().c_str(), req.body().size())) {
-        errcode = -6;
-        errmsg.assign("JSON格式错误");
-        return;
-    }
+//     if (!root.parse(req.body().c_str(), req.body().size())) {
+//         errcode = -6;
+//         errmsg.assign("JSON格式错误");
+//         return;
+//     }
 
-    if (!root.root().isMember("email")    || !root.root()["email"].isString() ||
-        !root.root().isMember("password") || !root.root()["password"].isString()) {
-        errcode = -6;
-        errmsg.assign("请求参数不全");
-        return;
-    }
+//     if (!root.root().isMember("email")    || !root.root()["email"].isString() ||
+//         !root.root().isMember("password") || !root.root()["password"].isString()) {
+//         errcode = -6;
+//         errmsg.assign("请求参数不全");
+//         return;
+//     }
 
-    request->set_email(root.root()["email"].asString());
-    request->set_password(root.root()["password"].asString());
+//     request->set_email(root.root()["email"].asString());
+//     request->set_password(root.root()["password"].asString());
 
-    auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
-    context->set_deadline(deadline);
+//     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
+//     context->set_deadline(deadline);
     
-    this->Authstub->async()->Login(context.get(), request.get(), response.get(), 
-    [request, response, context, callback] (grpc::Status s) {
-        if(s.ok()) {
-            LogicInfo info = LogicInfo{response->code(), response->error_msg(), 
-            response->token(), response->userid(), response->username()};
-            callback(info);
-        }
-    });
-}
+//     this->Authstub->async()->Login(context.get(), request.get(), response.get(), 
+//     [request, response, context, callback] (grpc::Status s) {
+//         if(s.ok()) {
+//             LogicInfo info = LogicInfo{response->code(), response->error_msg(), 
+//             response->token(), response->userid(), response->username()};
+//             callback(info);
+//         }
+//     });
+// }
 
-void grpcClient::rpcRegisterAsync(const HttpRequest& req, int& errcode, std::string& errmsg, 
-    std::function<void(RegisterInfo)> callback) {
+// void grpcClient::rpcRegisterAsync(const HttpRequest& req, int& errcode, std::string& errmsg, 
+//     std::function<void(RegisterInfo)> callback) {
 
-    auto context = std::make_shared<ClientContext>();
-    auto request = std::make_shared<auth::RegisterRequest>();
-    auto response = std::make_shared<auth::RegisterResponse>();
+//     auto context = std::make_shared<ClientContext>();
+//     auto request = std::make_shared<auth::RegisterRequest>();
+//     auto response = std::make_shared<auth::RegisterResponse>();
 
-    JsonDoc root;
+//     JsonDoc root;
 
-    if (!root.parse(req.body().c_str(), req.body().size())) {
-        errcode = -6;
-        errmsg.assign("JSON格式错误");
-        return;
-    }
+//     if (!root.parse(req.body().c_str(), req.body().size())) {
+//         errcode = -6;
+//         errmsg.assign("JSON格式错误");
+//         return;
+//     }
 
-    if (!root.root().isMember("username") || !root.root()["username"].isString() ||
-        !root.root().isMember("email")    || !root.root()["email"].isString() ||
-        !root.root().isMember("password") || !root.root()["password"].isString()) {
-        errcode = -6;
-        errmsg.assign("请求参数不全");
-        return;
-    }
+//     if (!root.root().isMember("username") || !root.root()["username"].isString() ||
+//         !root.root().isMember("email")    || !root.root()["email"].isString() ||
+//         !root.root().isMember("password") || !root.root()["password"].isString()) {
+//         errcode = -6;
+//         errmsg.assign("请求参数不全");
+//         return;
+//     }
 
-    request->set_username(root.root()["username"].asString());
-    request->set_email(root.root()["email"].asString());
-    request->set_password(root.root()["password"].asString());
+//     request->set_username(root.root()["username"].asString());
+//     request->set_email(root.root()["email"].asString());
+//     request->set_password(root.root()["password"].asString());
 
-    auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
-    context->set_deadline(deadline);
+//     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
+//     context->set_deadline(deadline);
 
-    this->Authstub->async()->Register(context.get(), request.get(), response.get(), 
-    [request, response, context, callback] (grpc::Status s) {
-        if(s.ok()) {
-            RegisterInfo info = RegisterInfo{response->code(), response->error_msg()};
-            callback(info);
-        }
-    });
-}
+//     this->Authstub->async()->Register(context.get(), request.get(), response.get(), 
+//     [request, response, context, callback] (grpc::Status s) {
+//         if(s.ok()) {
+//             RegisterInfo info = RegisterInfo{response->code(), response->error_msg()};
+//             callback(info);
+//         }
+//     });
+// }
 
 void grpcClient::rpcCilentMessageAsync(const std::string& message, int32_t userid, std::string username,
     std::function<void(std::string)> callback) {
@@ -196,35 +193,35 @@ void grpcClient::rpcGetUserRoomListAsync(int32_t userid, const std::string& addr
     });
 }
 
-void grpcClient::rpcJoinSessionAsync(int32_t userid, const std::string& roomname, const std::function<void(int, const std::string&, int64_t)>& cb) {
-    auto ctx = std::make_shared<ClientContext>();
-    auto request = std::make_shared<logic::joinSessionRequest>();
-    auto response = std::make_shared<logic::joinSessionResponse>();
+// void grpcClient::rpcJoinSessionAsync(int32_t userid, const std::string& roomname, const std::function<void(int, const std::string&, int64_t)>& cb) {
+//     auto ctx = std::make_shared<ClientContext>();
+//     auto request = std::make_shared<logic::joinSessionRequest>();
+//     auto response = std::make_shared<logic::joinSessionResponse>();
 
-    request->set_userid(userid);
-    request->set_roomname(roomname);
+//     request->set_userid(userid);
+//     request->set_roomname(roomname);
 
-    this->Logicstub->async()->joinSession(ctx.get(), request.get(), response.get(), 
-    [ctx, request, response, cb = std::move(cb)] (grpc::Status s) {
-        if(s.ok()) {
-            cb(response->code(), response->error_msg(), response->roomid());
-        }
-    });
-}
+//     this->Logicstub->async()->joinSession(ctx.get(), request.get(), response.get(), 
+//     [ctx, request, response, cb = std::move(cb)] (grpc::Status s) {
+//         if(s.ok()) {
+//             cb(response->code(), response->error_msg(), response->roomid());
+//         }
+//     });
+// }
 
-void grpcClient::rpcCreateSessionAsync(int32_t userid, const std::string& roomname, const std::function<void(int32_t, const std::string&, int64_t)>& cb) {
-    auto ctx = std::make_shared<ClientContext>();
-    auto request = std::make_shared<logic::createSessionRequest>();
-    auto response = std::make_shared<logic::createSessionResponse>();
+// void grpcClient::rpcCreateSessionAsync(int32_t userid, const std::string& roomname, const std::function<void(int32_t, const std::string&, int64_t)>& cb) {
+//     auto ctx = std::make_shared<ClientContext>();
+//     auto request = std::make_shared<logic::createSessionRequest>();
+//     auto response = std::make_shared<logic::createSessionResponse>();
 
-    request->set_userid(userid);
-    request->set_roomname(roomname);
+//     request->set_userid(userid);
+//     request->set_roomname(roomname);
 
-    this->Logicstub->async()->createSession(ctx.get(), request.get(), response.get(), 
-    [ctx, request, response, cb = std::move(cb)] (grpc::Status s) {
-        cb(response->code(), response->error_msg(), response->roomid());
-    });
-}
+//     this->Logicstub->async()->createSession(ctx.get(), request.get(), response.get(), 
+//     [ctx, request, response, cb = std::move(cb)] (grpc::Status s) {
+//         cb(response->code(), response->error_msg(), response->roomid());
+//     });
+// }
 
 void grpcClient::rpcJoinRooms(int32_t userid, std::vector<std::string>& rooms) {
     ClientContext ctx;

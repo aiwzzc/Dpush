@@ -3,6 +3,8 @@
 #include "muduo/net/TcpServer.h"
 #include "muduo/net/EventLoop.h"
 
+#include "coroutineTask.h"
+
 #include <string>
 #include <iostream>
 #include <memory>
@@ -68,33 +70,32 @@ class HttpResponse;
 class HttpServer {
 
 public:
-    using HttpCallback = std::function<void(TcpConnectionPtr conn, HttpRequest)>;
-    using UpgradeCallback = std::function<void(const TcpConnectionPtr&, const HttpRequest&)>;
+    using HttpCallback = std::function<void(const HttpRequest&, HttpResponse&)>;
+    using AsyncHttpCallback = std::function<DetachedTask(const TcpConnectionPtr&, const HttpRequest&)>;
     using ThreadInitCallback = std::function<void(EventLoop*)>;
-    using MainLoopTimerCallback = std::function<void()>;
 
     HttpServer(const muduo::net::InetAddress &addr, const std::string& name, int num_event_loops);
-    // HttpServer(uint16_t start_port, int port_count, const std::string& name, int total_event_loops);
     ~HttpServer();
 
     static std::unordered_map<std::string, std::string> StaticFilesHash;
 
     void start();
-    void setHttpCallback(const HttpCallback& cb);
-    void setUpgradeCallback(const UpgradeCallback& cb);
+    // void setHttpCallback(const HttpCallback& cb);
     void setThreadInitCallback(const ThreadInitCallback& cb);
-    void setMainLoopTimerCallback(const MainLoopTimerCallback& cb);
+    void Get(const std::string& path, const HttpCallback& cb);
+    void GetAsync(const std::string& path, const AsyncHttpCallback& cb);
 
 private:
+
+    std::unordered_map<std::string, HttpCallback> routes;
+    std::unordered_map<std::string, AsyncHttpCallback> coro_routes;
+
     void onConnection(const TcpConnectionPtr& conn);
     void onMessage(const TcpConnectionPtr& conn, muduo::net::Buffer* buf);
     void onRequest(const TcpConnectionPtr& conn, const HttpRequest& request);
-    void defaultHttpCallback(const TcpConnectionPtr&, const HttpRequest&);
+    void defaultHttpCallback(const TcpConnectionPtr& conn, const HttpRequest& request);
 
     std::unique_ptr<EventLoop> loop_;
     std::unique_ptr<TcpServer> server_;
-    // std::vector<std::unique_ptr<TcpServer>> servers_;
-    HttpCallback httpCallback_;
-    UpgradeCallback upgradeCallback_;
-    MainLoopTimerCallback mainLoopTimerCallback_;
+    // HttpCallback httpCallback_;
 };

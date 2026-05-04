@@ -7,16 +7,16 @@
 #include <string>
 #include <string_view>
 
-#include "websocketConn.h"
+#include "websocketSession.h"
 
 class Entry {
 
 public:
-    explicit Entry(const WebsocketConnPtr&);
+    explicit Entry(const WsSessionPtr&);
     ~Entry();
 
 private:
-    std::weak_ptr<WebsocketConn> conn_;
+    std::weak_ptr<WsSession> conn_;
 
 };
 
@@ -30,7 +30,7 @@ public:
     heartbeatManager();
 
     void onTimerTick();
-    void onMessagePing(const WebsocketConnPtr& webconn, int64_t ts, 
+    void onMessagePing(const WsSessionPtr& webconn, int64_t ts, 
         const std::function<void(const std::string&)>& callback);
 
 private:

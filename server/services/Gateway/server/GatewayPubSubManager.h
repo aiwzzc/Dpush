@@ -1,7 +1,6 @@
 #pragma once
 
 #include <thread>
-#include <sw/redis++/redis++.h>
 #include <memory>
 #include <mutex>
 #include <atomic>
@@ -11,12 +10,13 @@
 #include <array>
 #include <unordered_map>
 #include <unordered_set>
+#include <sw/redis++/redis++.h>
 
 #include "muduo/net/EventLoop.h"
 #include "LRUCache.h"
 
-class WebsocketConn;
-using WebsocketConnPtr = std::shared_ptr<WebsocketConn>;
+class WsSession;
+using WsSessionPtr = std::shared_ptr<WsSession>;
 using muduo::net::EventLoop;
 using muduo::net::TcpConnectionPtr;
 
@@ -25,7 +25,7 @@ constexpr std::size_t BUCKET_NUM = 16;
 // hash 分桶
 struct RoomBucket {
     std::mutex mtx_;
-    std::unordered_map<std::string, std::unordered_set<WebsocketConnPtr>> roomHash_;
+    std::unordered_map<std::string, std::unordered_set<WsSessionPtr>> roomHash_;
 };
 
 class GatewayPubSubManager {
@@ -34,7 +34,7 @@ public:
     static constexpr int batch_size = 1000;
 
     // userid --> websocketconn
-    static std::unordered_map<int32_t, WebsocketConnPtr> WebsockConnhash;
+    static std::unordered_map<int32_t, WsSessionPtr> WebsockConnhash;
     static std::mutex WebsockConnhashMutex;
 
     static std::array<RoomBucket, BUCKET_NUM> roomBuckets;
@@ -58,7 +58,7 @@ public:
     static void UnSubscribeRoomSafe(const std::string& roomid);
     static void RegisterLoop(EventLoop* loop);
 
-    void sendInBatches(EventLoop* loop, std::shared_ptr<std::vector<WebsocketConnPtr>> conns, 
+    void sendInBatches(EventLoop* loop, std::shared_ptr<std::vector<WsSessionPtr>> conns, 
         int start_idx, std::shared_ptr<std::string> message);
 
 private:
@@ -69,5 +69,5 @@ private:
     std::atomic<bool> running_{true};
 };
 
-extern thread_local std::unordered_map<int32_t, WebsocketConnPtr> LocalWebsockConnhash;
-extern thread_local std::unordered_map<std::string, std::vector<WebsocketConnPtr>> LocalWebsockConnRoomhash;
+extern thread_local std::unordered_map<int32_t, WsSessionPtr> LocalWebsockConnhash;
+extern thread_local std::unordered_map<std::string, std::vector<WsSessionPtr>> LocalWebsockConnRoomhash;

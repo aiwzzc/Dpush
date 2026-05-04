@@ -13,6 +13,7 @@ public:
         k400BadRequest = 400,
         k403Forbidden = 403,
         k404NotFound = 404,
+        K503ServiceUnavailable = 503,
         k101SwitchingProtocols = 101
     };
 
@@ -34,6 +35,7 @@ private:
     std::map<std::string, std::string> headers_;
     HttpStatusCode statusCode_;
     std::string statusMessage_; // 状态行
+    std::string content_type_;
     std::string body_;
     std::string cookie_;
     bool closeConnection_;

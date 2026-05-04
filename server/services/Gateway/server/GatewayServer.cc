@@ -1,7 +1,6 @@
 #include "GatewayServer.h"
 #include "producer.h"
 #include "iouring.h"
-#include "handleHttpEvent.h"
 #include "heartbeatManager.h"
 #include "config.h"
 #include "yyjson/JsonView.h"
@@ -38,18 +37,16 @@ std::shared_mutex GatewayServer::user_Eventloop_mutex_{};
 std::atomic<long> GatewayServer::conned_count_{0};
 
 GatewayServer::GatewayServer() : 
-HttpServer_(std::make_unique<HttpServer>(muduo::net::InetAddress{"0.0.0.0", (uint16_t)Config::getInstance().port_}, "HttpServer", 6)), 
-grpcClient_(std::make_shared<grpcClient>()),
-GatewayPubSubManager_(std::make_unique<GatewayPubSubManager>()), kafkaProducer_(std::make_shared<kafkaProducer>()) {
-    this->HttpServer_->setHttpCallback([this] (TcpConnectionPtr conn, HttpRequest req) {
-        HttpEventHandlers::getInstance().handleHttpEvent(conn, req, this->grpcClient_);
-    });
+grpcClient_(std::make_unique<grpcClient>()), GatewayPubSubManager_(std::make_unique<GatewayPubSubManager>()), 
+kafkaProducer_(std::make_unique<kafkaProducer>()) {
 
-    this->HttpServer_->setUpgradeCallback([this] (const TcpConnectionPtr& conn, const HttpRequest& req) {
-        handleUpgradeEvent(conn, req, this->grpcClient_, this->kafkaProducer_);
-    });
+    WsServerContext ctx{this->grpcClient_.get(), this->kafkaProducer_.get()};
 
-    this->HttpServer_->setThreadInitCallback([] (EventLoop* loop) {
+    this->wsServer_ = std::make_unique<wsServer>(
+    muduo::net::InetAddress{"0.0.0.0", (uint16_t)Config::getInstance().port_}, 
+    "wsServer", 6, ctx);
+
+    this->wsServer_->setThreadInitCallback([] (EventLoop* loop) {
         t_uring_ptr = std::make_unique<ThreadLocalUring>(loop);
         t_heartbeatManager_ptr = std::make_unique<heartbeatManager>();
         loop->runEvery(30, [] () {
@@ -166,10 +163,10 @@ void GatewayServer::start() {
         }
     });
 
-    this->HttpServer_->setMainLoopTimerCallback([this] () {
+    this->wsServer_->setMainLoopTimerCallback([this] () {
         this->collect_load_to_spsc();
     });
 
     this->register_->start();
-    this->HttpServer_->start();
+    this->wsServer_->start();
 }

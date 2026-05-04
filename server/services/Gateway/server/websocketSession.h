@@ -17,27 +17,24 @@ class HttpRequest;
 using muduo::net::TcpConnectionPtr;
 using muduo::net::EventLoop;
 
-struct WebSocketFrame {
-    bool fin;
-    uint8_t opcode;
-    bool mask;
-    uint64_t payload_length;
-    uint8_t masking_key[4];
-    std::string payload_data;
+enum class WsState {
+    EXPECTING_HTTP_REQUEST = 0,
+    ESTABLISHED = 1
 };
 
-WebSocketFrame parseWebSocketFrame(const std::string& data);
+class WsSession;
+using WsSessionPtr = std::shared_ptr<WsSession>;
 
-class WebsocketConn : public std::enable_shared_from_this<WebsocketConn> {
+class WsSession : public std::enable_shared_from_this<WsSession> {
 
 public:
     using WebconnCloseCallback = std::function<void()>;
-    using WebsocketConnPtr = std::shared_ptr<WebsocketConn>;
 
-    WebsocketConn(const TcpConnectionPtr&);
-    ~WebsocketConn();
+    WsState state_ = WsState::EXPECTING_HTTP_REQUEST;
 
-    // std::vector<std::string> onRead(const TcpConnectionPtr& conn, muduo::net::Buffer* buf);
+    WsSession(const TcpConnectionPtr&);
+    ~WsSession();
+
     std::vector<std::string> onRead(const TcpConnectionPtr& conn, muduo::net::Buffer* buf);
     void setUserid(int32_t userid);
     void setUsername(const std::string&);
@@ -65,23 +62,20 @@ public:
     std::optional<int> getRoom_index(const std::string& room_id) const;
     const std::unordered_map<std::string, int>& getjoinedRooms() const;
 
-    static void SubscribeSession(const WebsocketConnPtr& conn, const std::string& roomid);
+    static void SubscribeSession(const WsSessionPtr& conn, const std::string& roomid);
 
 private:
     bool isCloseFrame();
 
-    TcpConnectionPtr conn_;
+    std::weak_ptr<muduo::net::TcpConnection> conn_;
     int32_t userid_;
     std::string username_;
     WebconnCloseCallback webconnCloseCallback_;
 
-    // std::vector<std::string> joinedRooms_;
     std::unordered_map<std::string, int> joinedRooms_;
     std::any context_;
 
 };
 
-using WebsocketConnPtr = std::shared_ptr<WebsocketConn>;
-
-extern std::unordered_map<int32_t, WebsocketConnPtr> WebsockConnhash;
+extern std::unordered_map<int32_t, WsSessionPtr> WebsockConnhash;
 extern std::mutex WebsockConnhashMutex;

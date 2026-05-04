@@ -3,10 +3,10 @@
 #include <unordered_map>
 
 #include "muduo/net/EventLoop.h"
-#include "websocketConn.h"
+#include "websocketSession.h"
 #include "GatewayServer.h"
 
-extern thread_local std::unordered_map<int32_t, WebsocketConnPtr> LocalWebsockConnhash;
+extern thread_local std::unordered_map<int32_t, WsSessionPtr> LocalWebsockConnhash;
 
 struct SendSingleMsgAwaiter {
 
@@ -19,7 +19,7 @@ struct SendSingleMsgAwaiter {
         this->loop_->runInLoop([this, handle] () {
             auto it = LocalWebsockConnhash.find(this->user_id_);
             if(it != LocalWebsockConnhash.end()) {
-                WebsocketConnPtr conn = it->second;
+                WsSessionPtr conn = it->second;
 
                 conn->send(this->message_);
             }

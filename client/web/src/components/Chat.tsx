@@ -96,6 +96,7 @@ export function Chat({ user, onLogout }: ChatProps) {
 
   // 网络状态相关状态
   const [connectionState, setConnectionState] = useState<'connected' | 'connecting' | 'disconnected'>('connecting');
+  const [gatewayError, setGatewayError] = useState<string | null>(null);
   const [rtt, setRtt] = useState<number | null>(null);
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
   
@@ -109,6 +110,9 @@ export function Chat({ user, onLogout }: ChatProps) {
   const roomScrollPositionsRef = useRef<Record<string, number>>({});
   const networkRetryTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
   const businessTimeoutTimersRef = useRef<Record<string, NodeJS.Timeout>>({});
+  const gatewayUrlsRef = useRef<string[]>([]);
+  const dispatchRetryCountRef = useRef(0);
+
   const roomMaxServerMsgIdRef = useRef<Record<string, number>>({});
   const pendingMessagesRef = useRef<Record<string, Record<number, any>>>({});
   const roomsRef = useRef<Room[]>([]);
@@ -203,15 +207,61 @@ export function Chat({ user, onLogout }: ChatProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const connectWebSocket = () => {
+  const connectWebSocket = async () => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
     if (isConnectingRef.current) return;
     isConnectingRef.current = true;
+    setGatewayError(null);
 
     setConnectionState(reconnectAttemptRef.current < 2 && reconnectAttemptRef.current > 0 ? 'connecting' : (reconnectAttemptRef.current >= 2 ? 'disconnected' : 'connecting'));
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const DISPATCH_URL = '/api/get_gateway';
+
+    // 1. Fetch from dispatch server if no gateways left
+    if (gatewayUrlsRef.current.length === 0) {
+      if (dispatchRetryCountRef.current >= 5) {
+        setGatewayError('服务端繁忙，请稍后再试');
+        setConnectionState('disconnected');
+        isConnectingRef.current = false;
+        return; // give up formatting auto retry
+      }
+      try {
+        const res = await fetch(DISPATCH_URL);
+        const data = await res.json();
+        dispatchRetryCountRef.current += 1;
+        
+        if (data.code === 0 && data.urls && data.urls.length > 0) {
+          gatewayUrlsRef.current = data.urls;
+        } else {
+          throw new Error(data.error || 'No gateways available');
+        }
+      } catch (err) {
+        console.error('Failed to get gateway:', err);
+        dispatchRetryCountRef.current += 1;
+        isConnectingRef.current = false;
+        handleReconnect();
+        return;
+      }
+    }
+
+    // 2. Pick the first gateway URL
+    const originUrl = gatewayUrlsRef.current.shift();
+    if (!originUrl) {
+      isConnectingRef.current = false;
+      handleReconnect();
+      return;
+    }
+
+    // 3. Convert HTTP to WS URL
+    let wsUrl = originUrl;
+    if (wsUrl.startsWith('https://')) {
+      wsUrl = wsUrl.replace('https://', 'wss://') + '/ws';
+    } else if (wsUrl.startsWith('http://')) {
+      wsUrl = wsUrl.replace('http://', 'ws://') + '/ws';
+    } else {
+      wsUrl = wsUrl + '/ws'; // fallback
+    }
+
     const socket = new WebSocket(wsUrl);
 
     socket.binaryType = 'arraybuffer';
@@ -222,6 +272,10 @@ export function Chat({ user, onLogout }: ChatProps) {
       setConnectionState('connected');
       setReconnectAttempt(0);
       reconnectAttemptRef.current = 0;
+      dispatchRetryCountRef.current = 0;
+      
+      // Clear gateway urls so that a future drop fetches a fresh gateway from dispatch
+      gatewayUrlsRef.current = [];
       
       // Clear timers
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
@@ -281,7 +335,12 @@ export function Chat({ user, onLogout }: ChatProps) {
           }
 
           if (payloadType === AnyPayload.HelloMessagePayload) {
-            const { HelloMessagePayload } = await import('../generated/chat_app');
+            const chatApp = await import('../generated/chat_app');
+            const HelloMessagePayload = (chatApp as any).HelloMessagePayload;
+            if (!HelloMessagePayload) {
+               console.warn("HelloMessagePayload not found in chat_app");
+               return;
+            }
             const payload = root.payload(new HelloMessagePayload()) as any;
             
             const roomsLen = payload.roomsLength();
@@ -1491,12 +1550,16 @@ export function Chat({ user, onLogout }: ChatProps) {
             <span className="text-xs text-blue-400">连接中...</span>
           </div>
         )}
-        {connectionState === 'disconnected' && (
+        {gatewayError ? (
+          <div className="absolute top-0 left-0 right-0 h-8 flex items-center justify-center bg-red-500/20 border-b border-red-500/30 z-50">
+            <span className="text-xs text-red-500 font-medium">{gatewayError}</span>
+          </div>
+        ) : connectionState === 'disconnected' ? (
           <div className="absolute top-0 left-0 right-0 h-8 flex items-center justify-center bg-red-500/20 border-b border-red-500/30 z-50">
             <span className="text-xs text-red-500 font-medium">未连接</span>
           </div>
-        )}
-        {connectionState === 'disconnected' && reconnectAttempt >= 3 && (
+        ) : null}
+        {connectionState === 'disconnected' && reconnectAttempt >= 3 && !gatewayError && (
           <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
             <div className="bg-zinc-900 border border-zinc-800 text-white px-6 py-4 rounded-xl shadow-2xl flex flex-col items-center">
               <AlertCircle className="w-8 h-8 text-red-500 mb-2" />

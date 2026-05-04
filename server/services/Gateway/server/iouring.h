@@ -15,7 +15,7 @@
 #include "muduo/base/Timestamp.h"
 #include "muduo/net/TcpConnection.h"
 #include "muduo/base/Logging.h"
-#include "websocketConn.h"
+#include "websocketSession.h"
 
 using muduo::net::EventLoop;
 using muduo::net::Channel;
@@ -173,7 +173,7 @@ public:
         this->pool_ = nullptr;
     }
 
-    void broadcastInLoop(const std::vector<WebsocketConnPtr>& conns, std::shared_ptr<std::string> message) {
+    void broadcastInLoop(const std::vector<WsSessionPtr>& conns, std::shared_ptr<std::string> message) {
         if(conns.empty()) return;
 
         auto task = std::make_shared<BroadcastTask>();
@@ -181,7 +181,9 @@ public:
         task->targets_.reserve(conns.size());
 
         for(const auto& conn : conns) {
-            task->targets_.push_back(conn->conn());
+            auto tcpconn = conn->conn();
+
+            if(tcpconn) task->targets_.push_back(tcpconn);
         }
 
         sendChunk(task);

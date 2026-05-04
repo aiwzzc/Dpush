@@ -4,3 +4,4 @@ project(DispatchServer)
 set(CMAKE_CXX_STANDARD 20)
 
 add_subdirectory(server)
+add_subdirectory(httpServer)

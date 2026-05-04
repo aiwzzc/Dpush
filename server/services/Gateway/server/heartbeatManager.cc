@@ -1,7 +1,7 @@
 #include "heartbeatManager.h"
 #include "chat_generated.h"
 
-Entry::Entry(const WebsocketConnPtr& conn) : conn_(conn) {}
+Entry::Entry(const WsSessionPtr& conn) : conn_(conn) {}
 
 Entry::~Entry() {
     auto conn = this->conn_.lock();
@@ -20,7 +20,7 @@ void heartbeatManager::onTimerTick() {
     this->wheel_[this->current_index_] = Bucket{};
 }
 
-void heartbeatManager::onMessagePing(const WebsocketConnPtr& webconn, int64_t ts,
+void heartbeatManager::onMessagePing(const WsSessionPtr& webconn, int64_t ts,
     const std::function<void(const std::string&)>& callback) {
     auto* context = webconn->getMutableContext();
     EntryPtr entry;

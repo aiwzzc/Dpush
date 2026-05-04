@@ -9,10 +9,7 @@
 
 #include <sw/redis++/redis++.h>
 
-#include "httpServer/HttpServer.h"
-#include "httpServer/HttpRequest.h"
-#include "handleHttpEvent.h"
-#include "handleUpgradeEvent.h"
+#include "wsServer.h"
 #include "grpcClient.h"
 #include "GatewayPubSubManager.h"
 #include "producer.h"
@@ -46,10 +43,10 @@ private:
     void collect_load_to_spsc();
     void write_load_to_redis(GatewayLoad& load);
 
-    std::unique_ptr<HttpServer> HttpServer_;
-    std::shared_ptr<grpcClient> grpcClient_;
+    std::unique_ptr<wsServer> wsServer_;
+    std::unique_ptr<grpcClient> grpcClient_;
     std::unique_ptr<GatewayPubSubManager> GatewayPubSubManager_;
-    std::shared_ptr<kafkaProducer> kafkaProducer_;
+    std::unique_ptr<kafkaProducer> kafkaProducer_;
     bool running_{true};
     std::thread poolthread_;
     std::thread redis_worker_;

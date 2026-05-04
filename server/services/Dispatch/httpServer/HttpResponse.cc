@@ -46,6 +46,12 @@ void HttpResponse::appendToBuffer(std::string& output) const {
     output.append(std::to_string(this->body_.size()));
     output.append("\r\n");
 
+    if(!this->content_type_.empty()) {
+        output.append("Content-Type: ");
+        output.append(this->content_type_);
+        output.append("\r\n");
+    }
+
     for(const auto& [key, value] : this->headers_) {
         output.append(key);
         output.append(": ");

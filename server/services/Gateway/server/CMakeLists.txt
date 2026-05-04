@@ -13,8 +13,6 @@ ${CMAKE_SOURCE_DIR}/proto/gateway.grpc.pb.cc
 ${CMAKE_SOURCE_DIR}/proto/gateway.pb.cc
 )
 
-add_subdirectory(httpServer)
-
 add_executable(GatewayServer ${SRC})
 
 target_include_directories(GatewayServer PUBLIC 

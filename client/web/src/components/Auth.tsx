@@ -40,49 +40,32 @@ export function Auth({ onLogin }: AuthProps) {
 
     try {
       const hashedPassword = await hashPassword(password);
+      const endpoint = isLogin ? '/api/login' : '/api/reg';
+      
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(isLogin ? { email, password: hashedPassword } : { username, email, password: hashedPassword }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.text();
+        throw new Error(parseErrorMessage(errorData, isLogin ? '登录失败，请检查邮箱和密码' : '注册失败，请重试'));
+      }
 
       if (isLogin) {
-        const response = await fetch('/api/login', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ email, password: hashedPassword }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.text();
-          throw new Error(parseErrorMessage(errorData, '登录失败，请检查邮箱和密码'));
-        }
-
-        let userinfo = { username: email.split('@')[0], email };
-        try {
-          const respData = await response.json();
-          if (respData && respData.userinfo) {
-            userinfo = { ...userinfo, ...respData.userinfo };
-          }
-        } catch (e) {
-          // Backward compatibility if backend doesn't return JSON
-        }
-
-        onLogin(userinfo);
+          let userinfo = { username: email.split('@')[0], email };
+          try {
+            const respData = await res.json();
+            if (respData && respData.userinfo) {
+              userinfo = { ...userinfo, ...respData.userinfo };
+            }
+          } catch (e) {}
+          onLogin(userinfo);
       } else {
-        const response = await fetch('/api/reg', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ username, email, password: hashedPassword }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.text();
-          throw new Error(parseErrorMessage(errorData, '注册失败，请重试'));
-        }
-
-        setSuccessMsg('注册成功，请登录！');
-        setIsLogin(true);
-        setPassword('');
+          setSuccessMsg('注册成功，请登录！');
+          setIsLogin(true);
+          setPassword('');
       }
     } catch (err: any) {
       setErrorMsg(err.message);
