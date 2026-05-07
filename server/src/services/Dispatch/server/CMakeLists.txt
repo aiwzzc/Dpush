@@ -4,12 +4,10 @@ add_executable(DispatchServer ${SRC})
 
 target_include_directories(DispatchServer
 PRIVATE
-    ${CMAKE_SOURCE_DIR}/libs/tools 
-    ${PROJECT_SOURCE_DIR}
     ${CMAKE_BINARY_DIR}/proto
     ${CMAKE_BINARY_DIR}/fbs 
-    ${CMAKE_SOURCE_DIR}/libs/concurrency
     ${CMAKE_SOURCE_DIR}/src/net
+    ${CMAKE_SOURCE_DIR}/src/base
     ${CMAKE_SOURCE_DIR}/third_party
 )
 

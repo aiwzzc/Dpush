@@ -1,8 +1,7 @@
 #include "GatewayPubSubManager.h"
 #include "websocketSession.h"
 #include "iouring.h"
-#include "types.h"
-#include "RedisKey.h"
+#include "utils/RedisKey.h"
 
 std::unordered_map<int32_t, WsSessionPtr> GatewayPubSubManager::WebsockConnhash{};
 std::mutex GatewayPubSubManager::WebsockConnhashMutex{};

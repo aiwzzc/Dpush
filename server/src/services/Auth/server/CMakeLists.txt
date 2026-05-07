@@ -9,9 +9,7 @@ ${CMAKE_SOURCE_DIR}/proto/auth.pb.cc)
 add_executable(AuthServer ${SRC} ${BASE})
 
 target_include_directories(AuthServer PUBLIC 
-${CMAKE_SOURCE_DIR}/libs  
 ${CMAKE_BINARY_DIR}/proto
-${CMAKE_SOURCE_DIR}/libs/utils
 ${CMAKE_SOURCE_DIR}/src/db
 ${CMAKE_SOURCE_DIR}/src/base
 )

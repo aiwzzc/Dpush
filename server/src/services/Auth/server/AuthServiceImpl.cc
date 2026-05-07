@@ -1,5 +1,5 @@
 #include "AuthServiceImpl.h"
-#include "RedisKey.h"
+#include "utils/RedisKey.h"
 #include <jwt.h>
 
 struct QueryAwaiter {

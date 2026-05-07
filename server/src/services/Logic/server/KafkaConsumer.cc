@@ -3,9 +3,11 @@
 #include <iostream>
 #include <charconv>
 
-#include "coroutineTask.h"
-#include "types.h"
-#include "RedisKey.h"
+#include "concurrency/coroutineTask.h"
+
+#include "utils/types.h"
+#include "utils/RedisKey.h"
+
 #include "chat_generated.h"
 
 KafkaConsumer::KafkaConsumer(const std::string& brokers, const std::string& group_id, 

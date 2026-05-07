@@ -2,10 +2,12 @@
 
 #include "room.grpc.pb.h"
 #include "room.pb.h"
-#include "types.h"
+
 #include "chat_generated.h"
-#include "SnowflakeIdWorker.h"
-#include "RedisKey.h"
+
+#include "utils/SnowflakeIdWorker.h"
+#include "utils/types.h"
+#include "utils/RedisKey.h"
 
 #include "AsyncMySQLConnPool/AsyncMysqlConnPool.h"
 #include "AsyncMySQLConnPool/AsyncMysqlConn.h"

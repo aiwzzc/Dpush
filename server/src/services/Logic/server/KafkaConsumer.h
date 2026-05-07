@@ -8,8 +8,8 @@
 #include <atomic>
 #include <sw/redis++/redis++.h>
 
-#include "OrderedThreadPool.h"
-#include "ComputeThreadPool.h"
+#include "concurrency/OrderedThreadPool.h"
+#include "concurrency/ComputeThreadPool.h"
 
 class grpcClient;
 

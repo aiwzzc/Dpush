@@ -1,4 +1,6 @@
 add_subdirectory(db/mysql)
 add_subdirectory(db/AsyncMySQLConnPool)
+add_subdirectory(base)
 add_subdirectory(net/http)
+add_subdirectory(net/etcdServiceNode)
 add_subdirectory(services)

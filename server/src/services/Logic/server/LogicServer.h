@@ -4,12 +4,14 @@
 #include <grpcpp/grpcpp.h>
 #include <sw/redis++/redis++.h>
 
-#include "OrderedThreadPool.h"
+#include "concurrency/OrderedThreadPool.h"
+#include "AsyncMySQLConnPool/AsyncMysqlCluster.h"
+
 #include "LogicGrpcServer.h"
 #include "KafkaConsumer.h"
 #include "grpcClient.h"
 #include "LogicDiscovery.h"
-#include "AsyncMySQLConnPool/AsyncMysqlCluster.h"
+
 
 class LogicServer {
 

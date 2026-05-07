@@ -1,6 +1,6 @@
 #include "producer.h"
 #include "chat_generated.h"
-#include "RedisKey.h"
+#include "utils/RedisKey.h"
 
 kafkaProducer::kafkaProducer() : my_dr_cb_(std::make_unique<MyDeliveryReportCb>()) { this->init_kafka(); }
 kafkaProducer::~kafkaProducer() = default;

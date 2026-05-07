@@ -16,7 +16,7 @@
 #include "grpcServer.h"
 #include "GatewayRegister.h"
 #include "concurrentqueue/concurrentqueue.h"
-#include "types.h"
+#include "utils/types.h"
 
 namespace muduo {
 namespace net {

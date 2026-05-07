@@ -1,6 +1,7 @@
 #include "roomServer.h"
 #include "chat_generated.h"
-#include "RedisKey.h"
+
+#include "utils/RedisKey.h"
 
 #include <unordered_set>
 #include <iostream>

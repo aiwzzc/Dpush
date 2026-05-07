@@ -9,8 +9,8 @@
 // #include "storage/mysql/MySQLWorker.h"
 // #include "storage/mysql/SQLOperation.h"
 
-#include "coroutineTask.h"
-#include "ComputeThreadPool.h"
+#include "concurrency/coroutineTask.h"
+#include "concurrency/ComputeThreadPool.h"
 
 #include <vector>
 #include <grpcpp/grpcpp.h>

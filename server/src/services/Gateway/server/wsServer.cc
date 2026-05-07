@@ -12,7 +12,7 @@
 #include "grpcClient.h"
 #include "producer.h"
 #include "config.h"
-#include "RedisKey.h"
+#include "utils/RedisKey.h"
 
 #include <openssl/sha.h>
 #include <jwt.h>

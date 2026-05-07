@@ -1,11 +1,10 @@
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} SRC)
-aux_source_directory(${CMAKE_SOURCE_DIR}/src/base BASE)
 
 set(PROTO_SRC 
 ${CMAKE_SOURCE_DIR}/proto/room.grpc.pb.cc 
 ${CMAKE_SOURCE_DIR}/proto/room.pb.cc)
 
-add_executable(RoomServer ${SRC} ${BASE})
+add_executable(RoomServer ${SRC})
 
 # target_include_directories(RoomServer PUBLIC 
 # ${CMAKE_SOURCE_DIR}/flatbuffers 
@@ -36,6 +35,7 @@ PRIVATE
 
     redis++ 
     hiredis 
-    push_crypto 
+    push_crypto
+    push_utils 
     proto_gen
 )

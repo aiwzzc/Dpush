@@ -4,7 +4,7 @@
 #include "heartbeatManager.h"
 #include "config.h"
 #include "yyjson/JsonView.h"
-#include "RedisKey.h"
+#include "utils/RedisKey.h"
 
 static char* read_file(const char* filename) {
     FILE* f = fopen(filename, "rb");

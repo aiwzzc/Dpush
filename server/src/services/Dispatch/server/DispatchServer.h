@@ -20,7 +20,7 @@
 #include "logic.grpc.pb.h"
 #include "logic.pb.h"
 
-#include "coroutineTask.h"
+#include "concurrency/coroutineTask.h"
 
 class HttpRequest;
 class HttpResponse;
