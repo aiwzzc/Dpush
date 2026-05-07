@@ -4,8 +4,8 @@ import { Send, Image as ImageIcon, LogOut, Sparkles, Loader2, Hash, Plus, X, Use
 import { GoogleGenAI } from '@google/genai';
 import * as flatbuffers from 'flatbuffers';
 import localforage from 'localforage';
-import { RootMessage, AnyPayload, ServerMessagePayload, RequestMessagePayload, MessageAckPayload, MsgContentType, SignalingFromServerPayload, PongPayload, BatchPullRoomHistoryPayload, ServerMessageItem, ChatType } from '../generated/chat_app';
-import { encodeClientMessage, encodePullMissingMessages, encodeRequestRoomHistory, encodeBatchPullMessage, encodeSignalingFromClient, encodeSignalingFromClientJoin, encodePing } from '../utils/fb-helper';
+import { RootMessage, AnyPayload, ServerMessagePayload, RequestMessagePayload, MessageAckPayload, MsgContentType, SignalingFromServerPayload, PongPayload, BatchPullRoomHistoryPayload, ServerMessageItem, ChatType, createSessionHttpResbodyPayload, JoinSessionHttpResbodyPayload } from '../generated/chat_app';
+import { encodeClientMessage, encodePullMissingMessages, encodeRequestRoomHistory, encodeBatchPullMessage, encodeSignalingFromClient, encodeSignalingFromClientJoin, encodePing, encodeCreateSessionHttpReqbody, encodeJoinSessionHttpReqbody } from '../utils/fb-helper';
 import { JoinSessionPayload } from '../generated/chat_app';
 
 // 智能解析时间戳（兼容秒级和毫秒级）
@@ -1059,10 +1059,12 @@ export function Chat({ user, onLogout }: ChatProps) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 
+      const requestPayload = encodeJoinSessionHttpReqbody(BigInt(currentUser.userid), joinRoomQuery.trim());
+
       const response = await fetch('/api/joinsession', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userid: currentUser.userid, roomname: joinRoomQuery.trim() }),
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: requestPayload,
         signal: controller.signal
       });
 
@@ -1072,14 +1074,39 @@ export function Chat({ user, onLogout }: ChatProps) {
         throw new Error('Failed to join room via HTTP');
       }
 
-      const data = await response.json();
-      if (data.errormsg) {
-        setJoinRoomError(data.errormsg);
-        setIsJoiningRoom(false);
-        return;
+      const buf = await response.arrayBuffer();
+      const bb = new flatbuffers.ByteBuffer(new Uint8Array(buf));
+      
+      let roomid: string | null = null;
+      try {
+        const rootMsg = RootMessage.getRootAsRootMessage(bb);
+        if (rootMsg.payloadType() === AnyPayload.JoinSessionHttpResbodyPayload) {
+          const resPayload = rootMsg.payload(new JoinSessionHttpResbodyPayload());
+          if (resPayload.code() !== 0) {
+             setJoinRoomError(resPayload.errMsg() || 'Join error');
+             setIsJoiningRoom(false);
+             return;
+          }
+          roomid = resPayload.roomId();
+        } else {
+          const resPayload = JoinSessionHttpResbodyPayload.getRootAsJoinSessionHttpResbodyPayload(bb);
+          if (resPayload.code() !== 0) {
+             setJoinRoomError(resPayload.errMsg() || 'Join error');
+             setIsJoiningRoom(false);
+             return;
+          }
+          roomid = resPayload.roomId();
+        }
+      } catch (e) {
+        const resPayload = JoinSessionHttpResbodyPayload.getRootAsJoinSessionHttpResbodyPayload(bb);
+        if (resPayload.code() !== 0) {
+             setJoinRoomError(resPayload.errMsg() || 'Join error');
+             setIsJoiningRoom(false);
+             return;
+        }
+        roomid = resPayload.roomId();
       }
 
-      const { roomid } = data;
       if (!roomid) {
         setJoinRoomError('服务器未返回 roomid');
         setIsJoiningRoom(false);
@@ -1251,10 +1278,12 @@ export function Chat({ user, onLogout }: ChatProps) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 
+      const requestPayload = encodeCreateSessionHttpReqbody(BigInt(currentUser.userid), newRoomName.trim());
+
       const response = await fetch('/api/createsession', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userid: currentUser.userid, roomname: newRoomName.trim() }),
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: requestPayload,
         signal: controller.signal
       });
 
@@ -1264,14 +1293,40 @@ export function Chat({ user, onLogout }: ChatProps) {
         throw new Error('Failed to create room via HTTP');
       }
 
-      const data = await response.json();
-      if (data.errormsg) {
-        setCreateRoomError(data.errormsg);
-        setIsCreatingRoom(false);
-        return;
+      const buf = await response.arrayBuffer();
+      const bb = new flatbuffers.ByteBuffer(new Uint8Array(buf));
+      
+      let roomid: string | null = null;
+      try {
+        const rootMsg = RootMessage.getRootAsRootMessage(bb);
+        if (rootMsg.payloadType() === AnyPayload.createSessionHttpResbodyPayload) {
+          const resPayload = rootMsg.payload(new createSessionHttpResbodyPayload());
+          if (resPayload.code() !== 0) {
+             setCreateRoomError(resPayload.errMsg() || 'Create error');
+             setIsCreatingRoom(false);
+             return;
+          }
+          roomid = resPayload.roomId();
+        } else {
+          // Fallback if not wrapped in RootMessage
+          const resPayload = createSessionHttpResbodyPayload.getRootAscreateSessionHttpResbodyPayload(bb);
+          if (resPayload.code() !== 0) {
+             setCreateRoomError(resPayload.errMsg() || 'Create error');
+             setIsCreatingRoom(false);
+             return;
+          }
+          roomid = resPayload.roomId();
+        }
+      } catch (e) {
+        // Fallback without RootMessage
+        const resPayload = createSessionHttpResbodyPayload.getRootAscreateSessionHttpResbodyPayload(bb);
+        if (resPayload.code() !== 0) {
+             setCreateRoomError(resPayload.errMsg() || 'Create error');
+             setIsCreatingRoom(false);
+             return;
+        }
+        roomid = resPayload.roomId();
       }
-
-      const { roomid } = data;
       if (!roomid) {
         setCreateRoomError('服务器未返回 roomid');
         setIsCreatingRoom(false);
@@ -1280,8 +1335,8 @@ export function Chat({ user, onLogout }: ChatProps) {
 
       // Send SignalingFromClientPayload using FlatBuffers over WebSocket
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        const buf = encodeSignalingFromClient("subscribe_room", roomid.toString());
-        wsRef.current.send(buf);
+        const payloadBuf = encodeSignalingFromClient("subscribe_room", roomid.toString());
+        wsRef.current.send(payloadBuf);
 
         // 设置 WebSocket 确认超时
         setTimeout(() => {
@@ -1634,8 +1689,8 @@ export function Chat({ user, onLogout }: ChatProps) {
                 const prevMsg = index > 0 ? currentMessages[index - 1] : null;
                 const nextMsg = index < currentMessages.length - 1 ? currentMessages[index + 1] : null;
 
-                const isSameSenderAsPrev = prevMsg && (prevMsg.sender === msg.sender) && (msg.timestamp.getTime() - prevMsg.timestamp.getTime() < 5 * 60 * 1000);
-                const isSameSenderAsNext = nextMsg && (nextMsg.sender === msg.sender) && (nextMsg.timestamp.getTime() - msg.timestamp.getTime() < 5 * 60 * 1000);
+                const isSameSenderAsPrev = prevMsg && (prevMsg.sender === msg.sender);
+                const isSameSenderAsNext = nextMsg && (nextMsg.sender === msg.sender);
                 
                 const showAvatar = !isSameSenderAsNext;
                 const showName = !isSameSenderAsPrev;

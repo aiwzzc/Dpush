@@ -23,7 +23,7 @@ set(GEN_FBS_DIR ${CMAKE_BINARY_DIR}/fbs)
 file(MAKE_DIRECTORY ${GEN_PROTO_DIR})
 file(MAKE_DIRECTORY ${GEN_FBS_DIR})
 
-set(PROTO_DIR ${CMAKE_SOURCE_DIR}/proto)
+set(PROTO_DIR ${CMAKE_SOURCE_DIR}/idl/pb)
 file(GLOB PROTO_FILES ${PROTO_DIR}/*.proto)
 set(GENERATED_PROTO_SRC "")
 find_program(GRPC_CPP_PLUGIN grpc_cpp_plugin REQUIRED)
@@ -92,7 +92,7 @@ PUBLIC
     absl::strings
 )
 
-set(FLATBUFFER_DIR ${CMAKE_SOURCE_DIR}/flatbuffers)
+set(FLATBUFFER_DIR ${CMAKE_SOURCE_DIR}/idl/fbs)
 file(GLOB FLATBUFFER_FILES ${FLATBUFFER_DIR}/*.fbs)
 set(GEN_FBS_HDRS "")
 
@@ -124,7 +124,8 @@ add_custom_target(fbs_generate ALL DEPENDS ${GEN_FBS_HDRS})
 # add_dependencies(fbs_gen fbs_generate)
 
 add_subdirectory(libs)
-add_subdirectory(services)
+add_subdirectory(third_party)
+add_subdirectory(src)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     message("Compile Debug")

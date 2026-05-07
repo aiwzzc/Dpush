@@ -12,8 +12,71 @@ import {
   BatchPullMessageItem,
   SignalingFromClientPayload,
   SignalingFromClientJoinPayload,
-  PingPayload
+  PingPayload,
+  createSessionHttpReqbodyPayload,
+  LoginHttpReqbodyPayload,
+  RegisterHttpReqbodyPayload,
+  JoinSessionHttpReqbodyPayload
 } from '../generated/chat_app';
+
+export function encodeCreateSessionHttpReqbody(userid: bigint, roomName: string): Uint8Array {
+  const builder = new flatbuffers.Builder(1024);
+  const roomNameOffset = builder.createString(roomName);
+  const payloadOffset = createSessionHttpReqbodyPayload.createcreateSessionHttpReqbodyPayload(builder, userid, roomNameOffset);
+  
+  RootMessage.startRootMessage(builder);
+  RootMessage.addPayloadType(builder, AnyPayload.createSessionHttpReqbodyPayload);
+  RootMessage.addPayload(builder, payloadOffset);
+  const rootOffset = RootMessage.endRootMessage(builder);
+  
+  builder.finish(rootOffset);
+  return builder.asUint8Array();
+}
+
+export function encodeLoginHttpReqbody(email: string, password: string): Uint8Array {
+  const builder = new flatbuffers.Builder(1024);
+  const emailOffset = builder.createString(email);
+  const passwordOffset = builder.createString(password);
+  const payloadOffset = LoginHttpReqbodyPayload.createLoginHttpReqbodyPayload(builder, emailOffset, passwordOffset);
+
+  RootMessage.startRootMessage(builder);
+  RootMessage.addPayloadType(builder, AnyPayload.LoginHttpReqbodyPayload);
+  RootMessage.addPayload(builder, payloadOffset);
+  const rootOffset = RootMessage.endRootMessage(builder);
+
+  builder.finish(rootOffset);
+  return builder.asUint8Array();
+}
+
+export function encodeRegisterHttpReqbody(username: string, email: string, password: string): Uint8Array {
+  const builder = new flatbuffers.Builder(1024);
+  const usernameOffset = builder.createString(username);
+  const emailOffset = builder.createString(email);
+  const passwordOffset = builder.createString(password);
+  const payloadOffset = RegisterHttpReqbodyPayload.createRegisterHttpReqbodyPayload(builder, usernameOffset, emailOffset, passwordOffset);
+
+  RootMessage.startRootMessage(builder);
+  RootMessage.addPayloadType(builder, AnyPayload.RegisterHttpReqbodyPayload);
+  RootMessage.addPayload(builder, payloadOffset);
+  const rootOffset = RootMessage.endRootMessage(builder);
+
+  builder.finish(rootOffset);
+  return builder.asUint8Array();
+}
+
+export function encodeJoinSessionHttpReqbody(userid: bigint, roomName: string): Uint8Array {
+  const builder = new flatbuffers.Builder(1024);
+  const roomNameOffset = builder.createString(roomName);
+  const payloadOffset = JoinSessionHttpReqbodyPayload.createJoinSessionHttpReqbodyPayload(builder, userid, roomNameOffset);
+
+  RootMessage.startRootMessage(builder);
+  RootMessage.addPayloadType(builder, AnyPayload.JoinSessionHttpReqbodyPayload);
+  RootMessage.addPayload(builder, payloadOffset);
+  const rootOffset = RootMessage.endRootMessage(builder);
+
+  builder.finish(rootOffset);
+  return builder.asUint8Array();
+}
 
 export function encodeClientMessage(chatType: number, targetId: string, clientMessageId: string, content: string, msgType: 'text' | 'image' = 'text', imageUrl?: string, replyTo?: number): Uint8Array {
   const builder = new flatbuffers.Builder(1024);

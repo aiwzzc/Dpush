@@ -2,21 +2,13 @@ import React, { useState } from 'react';
 import { User } from '../types';
 import { Loader2, X as XIcon } from 'lucide-react';
 import CryptoJS from 'crypto-js';
+import * as flatbuffers from 'flatbuffers';
+import { RootMessage, AnyPayload, LoginHttpResbodyPayload, RegisterHttpResbodyPayload } from '../generated/chat_app';
+import { encodeLoginHttpReqbody, encodeRegisterHttpReqbody } from '../utils/fb-helper';
 
 // 密码加密辅助函数 (SHA-256)
 async function hashPassword(password: string): Promise<string> {
   return CryptoJS.SHA256(password).toString();
-}
-
-// 解析后端返回的错误信息
-function parseErrorMessage(errorData: string, defaultMsg: string): string {
-  if (!errorData) return defaultMsg;
-  try {
-    const json = JSON.parse(errorData);
-    return json.message || errorData;
-  } catch {
-    return errorData;
-  }
 }
 
 interface AuthProps {
@@ -42,33 +34,82 @@ export function Auth({ onLogin }: AuthProps) {
       const hashedPassword = await hashPassword(password);
       const endpoint = isLogin ? '/api/login' : '/api/reg';
       
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const requestBody = isLogin ? encodeLoginHttpReqbody(email, hashedPassword) : encodeRegisterHttpReqbody(username, email, hashedPassword);
+
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(isLogin ? { email, password: hashedPassword } : { username, email, password: hashedPassword }),
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: requestBody,
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
       if (!res.ok) {
-        const errorData = await res.text();
-        throw new Error(parseErrorMessage(errorData, isLogin ? '登录失败，请检查邮箱和密码' : '注册失败，请重试'));
+        throw new Error(isLogin ? '登录失败，请检查邮箱和密码' : '注册失败，请重试');
       }
 
+      const buf = await res.arrayBuffer();
+      const bb = new flatbuffers.ByteBuffer(new Uint8Array(buf));
+
       if (isLogin) {
-          let userinfo = { username: email.split('@')[0], email };
+          let userinfo: any = { username: email.split('@')[0], email };
+          let loginRes: LoginHttpResbodyPayload;
+          
           try {
-            const respData = await res.json();
-            if (respData && respData.userinfo) {
-              userinfo = { ...userinfo, ...respData.userinfo };
+            const rootMsg = RootMessage.getRootAsRootMessage(bb);
+            if (rootMsg.payloadType() === AnyPayload.LoginHttpResbodyPayload) {
+              loginRes = rootMsg.payload(new LoginHttpResbodyPayload());
+            } else {
+              loginRes = LoginHttpResbodyPayload.getRootAsLoginHttpResbodyPayload(bb);
             }
-          } catch (e) {}
+          } catch (e) {
+            loginRes = LoginHttpResbodyPayload.getRootAsLoginHttpResbodyPayload(bb);
+          }
+
+          if (loginRes.code() !== 0) {
+              throw new Error(loginRes.errMsg() || '登录失败');
+          }
+          
+          userinfo.userid = loginRes.userid().toString();
+          userinfo.username = loginRes.username() || userinfo.username;
+          userinfo.token = loginRes.token() || undefined;
+          
+          if (userinfo.token) {
+              document.cookie = `sid=${userinfo.token}; path=/; max-age=86400`; // 24 hours
+          }
+          
           onLogin(userinfo);
       } else {
+          let regRes: RegisterHttpResbodyPayload;
+          try {
+            const rootMsg = RootMessage.getRootAsRootMessage(bb);
+            if (rootMsg.payloadType() === AnyPayload.RegisterHttpResbodyPayload) {
+              regRes = rootMsg.payload(new RegisterHttpResbodyPayload());
+            } else {
+              regRes = RegisterHttpResbodyPayload.getRootAsRegisterHttpResbodyPayload(bb);
+            }
+          } catch (e) {
+            regRes = RegisterHttpResbodyPayload.getRootAsRegisterHttpResbodyPayload(bb);
+          }
+          
+          if (regRes.code() !== 0) {
+              throw new Error(regRes.errMsg() || '注册失败');
+          }
+
           setSuccessMsg('注册成功，请登录！');
           setIsLogin(true);
           setPassword('');
       }
     } catch (err: any) {
-      setErrorMsg(err.message);
+      if (err.name === 'AbortError') {
+        setErrorMsg('登录/注册请求响应超时，请检查后端服务');
+      } else {
+        setErrorMsg(err.message || '发生未知错误');
+      }
     } finally {
       setIsLoading(false);
     }

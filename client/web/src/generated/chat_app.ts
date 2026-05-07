@@ -2,7 +2,7 @@ import * as flatbuffers from 'flatbuffers';
 
 export enum MsgContentType { Unknown = 0, Text = 1, Image = 2, Audio = 3 }
 export enum ChatType { Single = 1, Group = 2 }
-export enum AnyPayload { NONE = 0, HelloMessagePayload = 1, ClientMessagePayload = 2, ServerMessagePayload = 3, RequestRoomHistoryPayload = 4, RequestMessagePayload = 5, PullMissingMessagePayload = 6, MessageAckPayload = 7, BatchPullMessagePayload = 8, JoinSessionPayload = 9, SignalingFromClientPayload = 10, SignalingFromServerPayload = 11, SignalingFromClientJoinPayload = 12, PingPayload = 13, PongPayload = 14, BatchPullRoomHistoryPayload = 15 }
+export enum AnyPayload { NONE = 0, HelloMessagePayload = 1, ClientMessagePayload = 2, ServerMessagePayload = 3, RequestRoomHistoryPayload = 4, RequestMessagePayload = 5, PullMissingMessagePayload = 6, MessageAckPayload = 7, BatchPullMessagePayload = 8, JoinSessionPayload = 9, SignalingFromClientPayload = 10, SignalingFromServerPayload = 11, SignalingFromClientJoinPayload = 12, PingPayload = 13, PongPayload = 14, BatchPullRoomHistoryPayload = 15, createSessionHttpReqbodyPayload = 16, createSessionHttpResbodyPayload = 17, LoginHttpReqbodyPayload = 18, LoginHttpResbodyPayload = 19, RegisterHttpReqbodyPayload = 20, RegisterHttpResbodyPayload = 21, JoinSessionHttpReqbodyPayload = 22, JoinSessionHttpResbodyPayload = 23 }
 
 export class BatchPullMessageItem {
   bb: flatbuffers.ByteBuffer | null = null;
@@ -714,5 +714,434 @@ export class BatchPullRoomHistoryPayload {
   historyChunksLength(): number {
     const offset = this.bb!.__offset(this.bb_pos, 6);
     return offset ? this.bb!.__vector_len(this.bb_pos + offset) : 0;
+  }
+}
+
+export class createSessionHttpReqbodyPayload {
+  bb: flatbuffers.ByteBuffer | null = null;
+  bb_pos = 0;
+  __init(i: number, bb: flatbuffers.ByteBuffer): createSessionHttpReqbodyPayload {
+    this.bb_pos = i;
+    this.bb = bb;
+    return this;
+  }
+
+  static getRootAscreateSessionHttpReqbodyPayload(bb: flatbuffers.ByteBuffer, obj?: createSessionHttpReqbodyPayload): createSessionHttpReqbodyPayload {
+    return (obj || new createSessionHttpReqbodyPayload()).__init(bb.readInt32(bb.position()) + bb.position(), bb);
+  }
+
+  userid(): bigint {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.readInt64(this.bb_pos + offset) : BigInt('0');
+  }
+
+  roomName(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 6);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+
+  static startcreateSessionHttpReqbodyPayload(builder: flatbuffers.Builder) {
+    builder.startObject(2);
+  }
+
+  static addUserid(builder: flatbuffers.Builder, userid: bigint) {
+    builder.addFieldInt64(0, userid, BigInt('0'));
+  }
+
+  static addRoomName(builder: flatbuffers.Builder, roomNameOffset: number) {
+    builder.addFieldOffset(1, roomNameOffset, 0);
+  }
+
+  static endcreateSessionHttpReqbodyPayload(builder: flatbuffers.Builder): number {
+    const offset = builder.endObject();
+    return offset;
+  }
+
+  static createcreateSessionHttpReqbodyPayload(builder: flatbuffers.Builder, userid: bigint, roomNameOffset: number): number {
+    createSessionHttpReqbodyPayload.startcreateSessionHttpReqbodyPayload(builder);
+    createSessionHttpReqbodyPayload.addUserid(builder, userid);
+    createSessionHttpReqbodyPayload.addRoomName(builder, roomNameOffset);
+    return createSessionHttpReqbodyPayload.endcreateSessionHttpReqbodyPayload(builder);
+  }
+}
+
+export class createSessionHttpResbodyPayload {
+  bb: flatbuffers.ByteBuffer | null = null;
+  bb_pos = 0;
+  __init(i: number, bb: flatbuffers.ByteBuffer): createSessionHttpResbodyPayload {
+    this.bb_pos = i;
+    this.bb = bb;
+    return this;
+  }
+
+  static getRootAscreateSessionHttpResbodyPayload(bb: flatbuffers.ByteBuffer, obj?: createSessionHttpResbodyPayload): createSessionHttpResbodyPayload {
+    return (obj || new createSessionHttpResbodyPayload()).__init(bb.readInt32(bb.position()) + bb.position(), bb);
+  }
+
+  code(): number {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.readInt32(this.bb_pos + offset) : 0;
+  }
+
+  errMsg(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 6);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+
+  userid(): bigint {
+    const offset = this.bb!.__offset(this.bb_pos, 8);
+    return offset ? this.bb!.readInt64(this.bb_pos + offset) : BigInt('0');
+  }
+
+  roomId(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 10);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+
+  static startcreateSessionHttpResbodyPayload(builder: flatbuffers.Builder) {
+    builder.startObject(4);
+  }
+
+  static addCode(builder: flatbuffers.Builder, code: number) {
+    builder.addFieldInt32(0, code, 0);
+  }
+
+  static addErrMsg(builder: flatbuffers.Builder, errMsgOffset: number) {
+    builder.addFieldOffset(1, errMsgOffset, 0);
+  }
+
+  static addUserid(builder: flatbuffers.Builder, userid: bigint) {
+    builder.addFieldInt64(2, userid, BigInt('0'));
+  }
+
+  static addRoomId(builder: flatbuffers.Builder, roomIdOffset: number) {
+    builder.addFieldOffset(3, roomIdOffset, 0);
+  }
+
+  static endcreateSessionHttpResbodyPayload(builder: flatbuffers.Builder): number {
+    const offset = builder.endObject();
+    return offset;
+  }
+}
+
+export class LoginHttpReqbodyPayload {
+  bb: flatbuffers.ByteBuffer | null = null;
+  bb_pos = 0;
+  __init(i: number, bb: flatbuffers.ByteBuffer): LoginHttpReqbodyPayload {
+    this.bb_pos = i;
+    this.bb = bb;
+    return this;
+  }
+
+  static getRootAsLoginHttpReqbodyPayload(bb: flatbuffers.ByteBuffer, obj?: LoginHttpReqbodyPayload): LoginHttpReqbodyPayload {
+    return (obj || new LoginHttpReqbodyPayload()).__init(bb.readInt32(bb.position()) + bb.position(), bb);
+  }
+
+  email(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+
+  password(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 6);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+
+  static startLoginHttpReqbodyPayload(builder: flatbuffers.Builder) {
+    builder.startObject(2);
+  }
+
+  static addEmail(builder: flatbuffers.Builder, emailOffset: number) {
+    builder.addFieldOffset(0, emailOffset, 0);
+  }
+
+  static addPassword(builder: flatbuffers.Builder, passwordOffset: number) {
+    builder.addFieldOffset(1, passwordOffset, 0);
+  }
+
+  static endLoginHttpReqbodyPayload(builder: flatbuffers.Builder): number {
+    const offset = builder.endObject();
+    return offset;
+  }
+
+  static createLoginHttpReqbodyPayload(builder: flatbuffers.Builder, emailOffset: number, passwordOffset: number): number {
+    LoginHttpReqbodyPayload.startLoginHttpReqbodyPayload(builder);
+    LoginHttpReqbodyPayload.addEmail(builder, emailOffset);
+    LoginHttpReqbodyPayload.addPassword(builder, passwordOffset);
+    return LoginHttpReqbodyPayload.endLoginHttpReqbodyPayload(builder);
+  }
+}
+
+export class LoginHttpResbodyPayload {
+  bb: flatbuffers.ByteBuffer | null = null;
+  bb_pos = 0;
+  __init(i: number, bb: flatbuffers.ByteBuffer): LoginHttpResbodyPayload {
+    this.bb_pos = i;
+    this.bb = bb;
+    return this;
+  }
+
+  static getRootAsLoginHttpResbodyPayload(bb: flatbuffers.ByteBuffer, obj?: LoginHttpResbodyPayload): LoginHttpResbodyPayload {
+    return (obj || new LoginHttpResbodyPayload()).__init(bb.readInt32(bb.position()) + bb.position(), bb);
+  }
+
+  code(): number {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.readInt32(this.bb_pos + offset) : 0;
+  }
+
+  errMsg(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 6);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+
+  userid(): bigint {
+    const offset = this.bb!.__offset(this.bb_pos, 8);
+    return offset ? this.bb!.readInt64(this.bb_pos + offset) : BigInt('0');
+  }
+
+  username(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 10);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+
+  token(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 12);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+
+  static startLoginHttpResbodyPayload(builder: flatbuffers.Builder) {
+    builder.startObject(5);
+  }
+
+  static addCode(builder: flatbuffers.Builder, code: number) {
+    builder.addFieldInt32(0, code, 0);
+  }
+
+  static addErrMsg(builder: flatbuffers.Builder, errMsgOffset: number) {
+    builder.addFieldOffset(1, errMsgOffset, 0);
+  }
+
+  static addUserid(builder: flatbuffers.Builder, userid: bigint) {
+    builder.addFieldInt64(2, userid, BigInt('0'));
+  }
+
+  static addUsername(builder: flatbuffers.Builder, usernameOffset: number) {
+    builder.addFieldOffset(3, usernameOffset, 0);
+  }
+
+  static addToken(builder: flatbuffers.Builder, tokenOffset: number) {
+    builder.addFieldOffset(4, tokenOffset, 0);
+  }
+
+  static endLoginHttpResbodyPayload(builder: flatbuffers.Builder): number {
+    const offset = builder.endObject();
+    return offset;
+  }
+}
+
+export class RegisterHttpReqbodyPayload {
+  bb: flatbuffers.ByteBuffer | null = null;
+  bb_pos = 0;
+  __init(i: number, bb: flatbuffers.ByteBuffer): RegisterHttpReqbodyPayload {
+    this.bb_pos = i;
+    this.bb = bb;
+    return this;
+  }
+
+  static getRootAsRegisterHttpReqbodyPayload(bb: flatbuffers.ByteBuffer, obj?: RegisterHttpReqbodyPayload): RegisterHttpReqbodyPayload {
+    return (obj || new RegisterHttpReqbodyPayload()).__init(bb.readInt32(bb.position()) + bb.position(), bb);
+  }
+
+  username(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+
+  email(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 6);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+
+  password(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 8);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+
+  static startRegisterHttpReqbodyPayload(builder: flatbuffers.Builder) {
+    builder.startObject(3);
+  }
+
+  static addUsername(builder: flatbuffers.Builder, usernameOffset: number) {
+    builder.addFieldOffset(0, usernameOffset, 0);
+  }
+
+  static addEmail(builder: flatbuffers.Builder, emailOffset: number) {
+    builder.addFieldOffset(1, emailOffset, 0);
+  }
+
+  static addPassword(builder: flatbuffers.Builder, passwordOffset: number) {
+    builder.addFieldOffset(2, passwordOffset, 0);
+  }
+
+  static endRegisterHttpReqbodyPayload(builder: flatbuffers.Builder): number {
+    const offset = builder.endObject();
+    return offset;
+  }
+
+  static createRegisterHttpReqbodyPayload(builder: flatbuffers.Builder, usernameOffset: number, emailOffset: number, passwordOffset: number): number {
+    RegisterHttpReqbodyPayload.startRegisterHttpReqbodyPayload(builder);
+    RegisterHttpReqbodyPayload.addUsername(builder, usernameOffset);
+    RegisterHttpReqbodyPayload.addEmail(builder, emailOffset);
+    RegisterHttpReqbodyPayload.addPassword(builder, passwordOffset);
+    return RegisterHttpReqbodyPayload.endRegisterHttpReqbodyPayload(builder);
+  }
+}
+
+export class RegisterHttpResbodyPayload {
+  bb: flatbuffers.ByteBuffer | null = null;
+  bb_pos = 0;
+  __init(i: number, bb: flatbuffers.ByteBuffer): RegisterHttpResbodyPayload {
+    this.bb_pos = i;
+    this.bb = bb;
+    return this;
+  }
+
+  static getRootAsRegisterHttpResbodyPayload(bb: flatbuffers.ByteBuffer, obj?: RegisterHttpResbodyPayload): RegisterHttpResbodyPayload {
+    return (obj || new RegisterHttpResbodyPayload()).__init(bb.readInt32(bb.position()) + bb.position(), bb);
+  }
+
+  code(): number {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.readInt32(this.bb_pos + offset) : 0;
+  }
+
+  errMsg(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 6);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+
+  static startRegisterHttpResbodyPayload(builder: flatbuffers.Builder) {
+    builder.startObject(2);
+  }
+
+  static addCode(builder: flatbuffers.Builder, code: number) {
+    builder.addFieldInt32(0, code, 0);
+  }
+
+  static addErrMsg(builder: flatbuffers.Builder, errMsgOffset: number) {
+    builder.addFieldOffset(1, errMsgOffset, 0);
+  }
+
+  static endRegisterHttpResbodyPayload(builder: flatbuffers.Builder): number {
+    const offset = builder.endObject();
+    return offset;
+  }
+}
+
+export class JoinSessionHttpReqbodyPayload {
+  bb: flatbuffers.ByteBuffer | null = null;
+  bb_pos = 0;
+  __init(i: number, bb: flatbuffers.ByteBuffer): JoinSessionHttpReqbodyPayload {
+    this.bb_pos = i;
+    this.bb = bb;
+    return this;
+  }
+
+  static getRootAsJoinSessionHttpReqbodyPayload(bb: flatbuffers.ByteBuffer, obj?: JoinSessionHttpReqbodyPayload): JoinSessionHttpReqbodyPayload {
+    return (obj || new JoinSessionHttpReqbodyPayload()).__init(bb.readInt32(bb.position()) + bb.position(), bb);
+  }
+
+  userid(): bigint {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.readInt64(this.bb_pos + offset) : BigInt('0');
+  }
+
+  roomName(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 6);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+
+  static startJoinSessionHttpReqbodyPayload(builder: flatbuffers.Builder) {
+    builder.startObject(2);
+  }
+
+  static addUserid(builder: flatbuffers.Builder, userid: bigint) {
+    builder.addFieldInt64(0, userid, BigInt('0'));
+  }
+
+  static addRoomName(builder: flatbuffers.Builder, roomNameOffset: number) {
+    builder.addFieldOffset(1, roomNameOffset, 0);
+  }
+
+  static endJoinSessionHttpReqbodyPayload(builder: flatbuffers.Builder): number {
+    const offset = builder.endObject();
+    return offset;
+  }
+
+  static createJoinSessionHttpReqbodyPayload(builder: flatbuffers.Builder, userid: bigint, roomNameOffset: number): number {
+    JoinSessionHttpReqbodyPayload.startJoinSessionHttpReqbodyPayload(builder);
+    JoinSessionHttpReqbodyPayload.addUserid(builder, userid);
+    JoinSessionHttpReqbodyPayload.addRoomName(builder, roomNameOffset);
+    return JoinSessionHttpReqbodyPayload.endJoinSessionHttpReqbodyPayload(builder);
+  }
+}
+
+export class JoinSessionHttpResbodyPayload {
+  bb: flatbuffers.ByteBuffer | null = null;
+  bb_pos = 0;
+  __init(i: number, bb: flatbuffers.ByteBuffer): JoinSessionHttpResbodyPayload {
+    this.bb_pos = i;
+    this.bb = bb;
+    return this;
+  }
+
+  static getRootAsJoinSessionHttpResbodyPayload(bb: flatbuffers.ByteBuffer, obj?: JoinSessionHttpResbodyPayload): JoinSessionHttpResbodyPayload {
+    return (obj || new JoinSessionHttpResbodyPayload()).__init(bb.readInt32(bb.position()) + bb.position(), bb);
+  }
+
+  code(): number {
+    const offset = this.bb!.__offset(this.bb_pos, 4);
+    return offset ? this.bb!.readInt32(this.bb_pos + offset) : 0;
+  }
+
+  errMsg(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 6);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+
+  userid(): bigint {
+    const offset = this.bb!.__offset(this.bb_pos, 8);
+    return offset ? this.bb!.readInt64(this.bb_pos + offset) : BigInt('0');
+  }
+
+  roomId(): string | null {
+    const offset = this.bb!.__offset(this.bb_pos, 10);
+    return offset ? this.bb!.__string(this.bb_pos + offset) : null;
+  }
+
+  static startJoinSessionHttpResbodyPayload(builder: flatbuffers.Builder) {
+    builder.startObject(4);
+  }
+
+  static addCode(builder: flatbuffers.Builder, code: number) {
+    builder.addFieldInt32(0, code, 0);
+  }
+
+  static addErrMsg(builder: flatbuffers.Builder, errMsgOffset: number) {
+    builder.addFieldOffset(1, errMsgOffset, 0);
+  }
+
+  static addUserid(builder: flatbuffers.Builder, userid: bigint) {
+    builder.addFieldInt64(2, userid, BigInt('0'));
+  }
+
+  static addRoomId(builder: flatbuffers.Builder, roomIdOffset: number) {
+    builder.addFieldOffset(3, roomIdOffset, 0);
+  }
+
+  static endJoinSessionHttpResbodyPayload(builder: flatbuffers.Builder): number {
+    const offset = builder.endObject();
+    return offset;
   }
 }

@@ -72,7 +72,7 @@ table ServerMessagePayload {
 } 
 
 table PullMissingMessagePayload { 
-    room_id: string;  
+    room_id: string;
     missing_message_ids: [long]; 
 } 
 
@@ -199,6 +199,10 @@ table JoinSessionHttpResbodyPayload {
     room_id: string;
 }
 
+table DispatchGatewayResbodyPayload {
+
+}
+
 union AnyPayload {
     HelloMessagePayload,
     ClientMessagePayload, 
@@ -222,7 +226,8 @@ union AnyPayload {
     RegisterHttpReqbodyPayload,
     RegisterHttpResbodyPayload,
     JoinSessionHttpReqbodyPayload,
-    JoinSessionHttpResbodyPayload
+    JoinSessionHttpResbodyPayload,
+    DispatchGatewayResbodyPayload
 } 
 
 table RootMessage { 
