@@ -4,26 +4,30 @@
 #include "http/HttpRequest.h"
 #include "http/HttpResponse.h"
 #include "muduo/base/Logging.h"
+#include "muduo/net/InetAddress.h"
 
 #include "chat_generated.h"
 
-#include "muduo/net/InetAddress.h"
-#include <grpcpp/grpcpp.h>
+#include "constants/RedisKey.h"
+#include "constants/http_constants.h"
+
 #include <coroutine>
 
+using namespace pulse::constants;
+
 dispatchServer::dispatchServer(const std::string& etcd_url) :
-etcd_url_(etcd_url) {
+etcd_url_(etcd_url), ServiceRegistryClient_(etcd_url) {
 
     muduo::Logger::setLogLevel(muduo::Logger::FATAL);
 
-    this->etcd_client_ = std::make_shared<etcd::Client>(this->etcd_url_);
+    // this->etcd_client_ = std::make_shared<etcd::Client>(this->etcd_url_);
     this->server_ = std::make_unique<HttpServer>(muduo::net::InetAddress{"0.0.0.0", 5001}, "HttpServer", 6);
 
-    this->Authchannel = grpc::CreateChannel("127.0.0.1:5006", grpc::InsecureChannelCredentials());
-    this->Authstub = auth::AuthServer::NewStub(this->Authchannel);
+    // this->Authchannel = grpc::CreateChannel("127.0.0.1:5006", grpc::InsecureChannelCredentials());
+    // this->Authstub = auth::AuthServer::NewStub(this->Authchannel);
 
-    this->Logicchannel = grpc::CreateChannel("127.0.0.1:5008", grpc::InsecureChannelCredentials());
-    this->Logicstub = logic::LogicServer::NewStub(this->Logicchannel);
+    // this->Logicchannel = grpc::CreateChannel("127.0.0.1:5008", grpc::InsecureChannelCredentials());
+    // this->Logicstub = logic::LogicServer::NewStub(this->Logicchannel);
 
     sw::redis::ConnectionOptions connection_options;
     connection_options.host = "127.0.0.1";
@@ -44,7 +48,7 @@ dispatchServer::~dispatchServer() {
 void dispatchServer::BackendSyncTask() {
     while(this->running_) {
         std::unordered_map<std::string, std::string> gateway_loads;
-        this->redisPool_->hgetall("gateway:load", std::inserter(gateway_loads, gateway_loads.begin()));
+        this->redisPool_->hgetall(rediskey::GatewayLoadKey, std::inserter(gateway_loads, gateway_loads.begin()));
 
         std::vector<GatewayInfo> temp_list;
         JsonDoc root;
@@ -72,28 +76,9 @@ void dispatchServer::BackendSyncTask() {
     }
 }
 
-void dispatchServer::onetcdWatcher(const etcd::Response& response) {
-    for(const auto& event : response.events()) {
-        std::string key = event.kv().key();
+namespace {
 
-        std::string ip_port = key.substr(this->watch_prefix_.length());
-
-        if(event.event_type() == etcd::Event::EventType::PUT) {
-            {
-                std::unique_lock<std::shared_mutex> lock(this->etcd_conns_mutex_);
-                this->etcd_conns_.insert(ip_port);
-            }
-
-        } else if(event.event_type() == etcd::Event::EventType::DELETE_) {
-            {
-                std::unique_lock<std::shared_mutex> lock(this->etcd_conns_mutex_);
-                this->etcd_conns_.erase(ip_port);
-            }
-        }
-    }
-}
-
-static bool req_is_close(const HttpRequest& req) {
+bool req_is_close(const HttpRequest& req) {
     auto connection_opt = req.getHeader("Connection");
 
     const std::string& connection = connection_opt.has_value() ? *(connection_opt.value()) : "";
@@ -103,7 +88,22 @@ static bool req_is_close(const HttpRequest& req) {
     return close;
 }
 
-static void sendRes(const TcpConnectionPtr& conn, HttpResponse& res) {
+void fill_http_response(int info_code, HttpResponse& res) {
+    if(info_code < 0) {
+        res.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
+        res.setStatusMessage(http::MSG_BAD_REQUEST);
+        res.setCloseConnection(true);
+
+    } else {
+        res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
+        res.setStatusMessage(http::MSG_OK);
+        res.setCloseConnection(true);
+    }
+
+    res.setContentType(std::string(http::CONTENT_TYPE_OCTET));
+}
+
+void sendRes(const TcpConnectionPtr& conn, HttpResponse& res) {
     std::string output;
     res.appendToBuffer(output);
 
@@ -112,6 +112,20 @@ static void sendRes(const TcpConnectionPtr& conn, HttpResponse& res) {
         conn->shutdown();
     }
 }
+
+template<typename Info, typename Builder>
+void sendHttpResponse(const TcpConnectionPtr& conn, const Info& info, HttpRequest& req, Builder&& builder) {
+    bool close = req_is_close(req);
+    HttpResponse res(close);
+
+    fill_http_response(info.errcode, res);
+
+    res.setBody(builder(info));
+
+    sendRes(conn, res);
+}
+
+};
 
 DetachedTask dispatchServer::onDispatch(TcpConnectionPtr conn, HttpRequest req) {
     bool close = req_is_close(req);
@@ -124,7 +138,7 @@ DetachedTask dispatchServer::onDispatch(TcpConnectionPtr conn, HttpRequest req) 
 
         if (this->cached_gateways_.empty()) {
             res.setStatusCode(HttpResponse::HttpStatusCode::K503ServiceUnavailable);
-            res.setContentType("application/json");
+            res.setContentType(std::string(http::CONTENT_TYPE_JSON));
             res.setBody(R"({"error": "No gateways available"})");
 
             co_return;
@@ -135,13 +149,18 @@ DetachedTask dispatchServer::onDispatch(TcpConnectionPtr conn, HttpRequest req) 
         int index{0};
         while(valid_urls.size() < count && index < this->cached_gateways_.size()) {
             const std::string& gateway_url = this->cached_gateways_[index++].gateway_url;
-            
-            {
-                std::shared_lock<std::shared_mutex> conns_lock(this->etcd_conns_mutex_);
-                if(this->etcd_conns_.contains(gateway_url)) {
-                    valid_urls.push_back(gateway_url);
-                }
+
+            auto gateway_endpoints = this->ServiceRegistryClient_.GetAllEndpoints(this->gateway_prefix_);
+            if(gateway_endpoints.index_map_.contains(gateway_url)) {
+                valid_urls.push_back(gateway_url);
             }
+            
+            // {
+            //     std::shared_lock<std::shared_mutex> conns_lock(this->etcd_conns_mutex_);
+            //     if(this->etcd_conns_.contains(gateway_url)) {
+            //         valid_urls.push_back(gateway_url);
+            //     }
+            // }
         }
     }
 
@@ -154,7 +173,7 @@ DetachedTask dispatchServer::onDispatch(TcpConnectionPtr conn, HttpRequest req) 
     }
     res_json += "]}";
 
-    res.setContentType("application/json");
+    res.setContentType(std::string(http::CONTENT_TYPE_JSON));
     res.setBody(res_json);
     sendRes(conn, res);
 }
@@ -238,27 +257,19 @@ std::string BuildLoginResfbs(const LoginInfo& info) {
 };
 
 DetachedTask dispatchServer::onLogin(TcpConnectionPtr conn, HttpRequest req) {
-    bool close = req_is_close(req);
-    HttpResponse res(close);
+    std::string auth_endpoint = this->ServiceRegistryClient_.GetEndpoint(this->auth_prefix_);
+    auth::AuthServer::Stub* stub = nullptr;
 
-    LoginInfo info = co_await async_authLogin_coro(this->Authstub.get(), req.body());
-
-    if(info.errcode < 0) {
-        res.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
-        res.setStatusMessage("Bad Request");
-        res.setCloseConnection(true);
-
-    } else {
-        res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
-        res.setStatusMessage("OK");
-        res.setCloseConnection(true);
+    {
+        std::shared_lock<std::shared_mutex> lock(this->auth_stubs_mutex_);
+        stub = this->auth_stubs_[auth_endpoint].get();
     }
 
-    res.setContentType("application/octet-stream");
-    std::string resJson = BuildLoginResfbs(info);
-    res.setBody(resJson);
+    if(stub == nullptr) co_return;
 
-    sendRes(conn, res);
+    LoginInfo info = co_await async_authLogin_coro(stub, req.body());
+
+    sendHttpResponse(conn, info, req, BuildLoginResfbs);
 }
 
 namespace {
@@ -336,27 +347,19 @@ std::string BuildRegisterResfbs(const RegisterInfo& info) {
 };
 
 DetachedTask dispatchServer::onRegister(TcpConnectionPtr conn, HttpRequest req) {
-    bool close = req_is_close(req);
-    HttpResponse res(close);
+    std::string auth_endpoint = this->ServiceRegistryClient_.GetEndpoint(this->auth_prefix_);
+    auth::AuthServer::Stub* stub = nullptr;
 
-    RegisterInfo info = co_await async_authregister_coro(this->Authstub.get(), req.body());
-
-    if(info.errcode < 0) {
-        res.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
-        res.setStatusMessage("Bad Request");
-        res.setCloseConnection(true);
-
-    } else {
-        res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
-        res.setStatusMessage("OK");
-        res.setCloseConnection(true);
+    {
+        std::shared_lock<std::shared_mutex> lock(this->auth_stubs_mutex_);
+        stub = this->auth_stubs_[auth_endpoint].get();
     }
 
-    res.setContentType("application/octet-stream");
-    std::string resJson = BuildRegisterResfbs(info);
-    res.setBody(resJson);
+    if(stub == nullptr) co_return;
 
-    sendRes(conn, res);
+    RegisterInfo info = co_await async_authregister_coro(stub, req.body());
+
+    sendHttpResponse(conn, info, req, BuildRegisterResfbs);
 }
 
 namespace {
@@ -436,27 +439,20 @@ std::string BuildJoinSessionResfbs(const JoinSessionInfo& info) {
 };
 
 DetachedTask dispatchServer::onjoinSession(TcpConnectionPtr conn, HttpRequest req) {
-    bool close = req_is_close(req);
-    HttpResponse res(close);
+    std::string logic_endpoint = this->ServiceRegistryClient_.GetEndpoint(this->logic_prefix_);
 
-    JoinSessionInfo info = co_await async_joinSession_coro(this->Logicstub.get(), req.body());
+    logic::LogicServer::Stub* stub = nullptr;
 
-    if(info.errcode < 0) {
-        res.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
-        res.setStatusMessage("Bad Request");
-        res.setCloseConnection(true);
-
-    } else {
-        res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
-        res.setStatusMessage("OK");
-        res.setCloseConnection(true);
+    {
+        std::shared_lock<std::shared_mutex> lock(this->logic_stubs_mutex_);
+        stub = this->logic_stubs_[logic_endpoint].get();
     }
 
-    res.setContentType("application/octet-stream");
-    std::string resJson = BuildJoinSessionResfbs(info);
-    res.setBody(resJson);
+    if(stub == nullptr) co_return;
 
-    sendRes(conn, res);
+    JoinSessionInfo info = co_await async_joinSession_coro(stub, req.body());
+
+    sendHttpResponse(conn, info, req, BuildJoinSessionResfbs);
 }
 
 namespace {
@@ -536,76 +532,105 @@ std::string BuildCreateSessionResfbs(const CreateSessionInfo& info) {
 };
 
 DetachedTask dispatchServer::oncreateSession(TcpConnectionPtr conn, HttpRequest req) {
-    bool close = req_is_close(req);
-    HttpResponse res(close);
+    std::string logic_endpoint = this->ServiceRegistryClient_.GetEndpoint(this->logic_prefix_);
 
-    CreateSessionInfo info = co_await async_createSession_coro(this->Logicstub.get(), req.body());
+    logic::LogicServer::Stub* stub = nullptr;
 
-    if(info.errcode < 0) {
-        res.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
-        res.setStatusMessage("Bad Request");
-        res.setCloseConnection(true);
-
-    } else {
-        res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
-        res.setStatusMessage("OK");
-        res.setCloseConnection(true);
+    {
+        std::shared_lock<std::shared_mutex> lock(this->logic_stubs_mutex_);
+        stub = this->logic_stubs_[logic_endpoint].get();
     }
 
-    res.setContentType("application/octet-stream");
-    std::string resJson = BuildCreateSessionResfbs(info);
-    res.setBody(resJson);
+    if(stub == nullptr) co_return;
+   
+    CreateSessionInfo info = co_await async_createSession_coro(stub, req.body());
 
-    sendRes(conn, res);
+    sendHttpResponse(conn, info, req, BuildCreateSessionResfbs);
 }
 
 void dispatchServer::start() {
-    auto response = this->etcd_client_->ls(this->watch_prefix_).get();
 
-    for(int i = 0; i < response.keys().size(); ++i) {
-        const std::string& ip_port = response.value(i).as_string();
+    this->ServiceRegistryClient_.RegisterSelf("/services/dispatch/", "192.168.183.130:5001");
 
-        {
-            std::unique_lock<std::shared_mutex> lock(this->etcd_conns_mutex_);
-            auto it = this->etcd_conns_.find(ip_port);
-            if(it == this->etcd_conns_.end()) this->etcd_conns_.insert(ip_port);
-        }
+    this->ServiceRegistryClient_.Subscribe(this->gateway_prefix_, 
+    [] (const etcd::Event& event) {});
+
+    this->ServiceRegistryClient_.Subscribe(this->auth_prefix_, 
+    [this] (const etcd::Event& event) {
+        this->onWatcher(event, this->auth_prefix_, 
+        this->auth_stubs_, this->auth_stubs_mutex_, [] (auto channel) {
+            return  auth::AuthServer::NewStub(channel);
+        });
+    });
+
+    this->ServiceRegistryClient_.Subscribe(this->logic_prefix_, 
+    [this] (const etcd::Event& event) {
+        this->onWatcher(event, this->logic_prefix_, 
+        this->logic_stubs_, this->logic_stubs_mutex_, [] (auto channel) {
+            return logic::LogicServer::NewStub(channel);
+        });
+    });
+
+    std::vector<std::string> auths = this->ServiceRegistryClient_.GetAllEndpoints(this->auth_prefix_).endpoints_;
+    for(const std::string& auth : auths) {
+        this->addStub(this->auth_stubs_, this->auth_stubs_mutex_, auth, [] (auto channel) {
+            return auth::AuthServer::NewStub(channel);
+        });
     }
 
-    this->etcd_watcher_ = std::make_unique<etcd::Watcher>(
-        this->etcd_url_,
-        this->watch_prefix_,
-        [this] (const etcd::Response& response) {
-            this->onetcdWatcher(response);
-        },
-        true
-    );
+    std::vector<std::string> logics = this->ServiceRegistryClient_.GetAllEndpoints(this->logic_prefix_).endpoints_;
+    for(const std::string& logic : logics) {
+        this->addStub(this->logic_stubs_, this->logic_stubs_mutex_, logic, [] (auto channel) {
+            return logic::LogicServer::NewStub(channel);
+        });
+    }
+
+    // auto response = this->etcd_client_->ls(this->watch_prefix_).get();
+
+    // for(int i = 0; i < response.keys().size(); ++i) {
+    //     const std::string& ip_port = response.value(i).as_string();
+
+    //     {
+    //         std::unique_lock<std::shared_mutex> lock(this->etcd_conns_mutex_);
+    //         auto it = this->etcd_conns_.find(ip_port);
+    //         if(it == this->etcd_conns_.end()) this->etcd_conns_.insert(ip_port);
+    //     }
+    // }
+
+    // this->etcd_watcher_ = std::make_unique<etcd::Watcher>(
+    //     this->etcd_url_,
+    //     this->watch_prefix_,
+    //     [this] (const etcd::Response& response) {
+    //         this->onetcdWatcher(response);
+    //     },
+    //     true
+    // );
 
     this->sync_worker_ = std::thread([this] () {
         this->BackendSyncTask();
     });
 
-    this->server_->GetAsync("/api/get_gateway", 
+    this->server_->GetAsync(http::DISPATCH_API_PATH, 
     [this] (const TcpConnectionPtr& conn, const HttpRequest& req) {
         return this->onDispatch(conn, std::move(req));
     });
 
-    this->server_->GetAsync("/api/login", 
+    this->server_->GetAsync(http::LOGIN_API_PATH, 
     [this] (const TcpConnectionPtr& conn, const HttpRequest& req) {
         return this->onLogin(conn, std::move(req));
     });
 
-    this->server_->GetAsync("/api/reg", 
+    this->server_->GetAsync(http::REGISTER_API_PATH, 
     [this] (const TcpConnectionPtr& conn, const HttpRequest& req) {
         return this->onRegister(conn, req);
     });
 
-    this->server_->GetAsync("/api/joinsession", 
+    this->server_->GetAsync(http::JOINSESSION_API_PATH, 
     [this] (const TcpConnectionPtr& conn, const HttpRequest& req) {
         return this->onjoinSession(conn, req);
     });
 
-    this->server_->GetAsync("/api/createsession", 
+    this->server_->GetAsync(http::CREATESESSION_API_PATH, 
     [this] (const TcpConnectionPtr& conn, const HttpRequest& req) {
         return this->oncreateSession(conn, req);
     });

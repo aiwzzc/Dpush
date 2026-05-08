@@ -36,6 +36,7 @@ PRIVATE
     redis++ 
     hiredis 
     push_crypto
-    push_utils 
+    push_utils
+    push_constants 
     proto_gen
 )

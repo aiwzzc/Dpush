@@ -1,7 +1,9 @@
 #include "GatewayPubSubManager.h"
 #include "websocketSession.h"
 #include "iouring.h"
-#include "utils/RedisKey.h"
+#include "constants/RedisKey.h"
+
+using namespace pulse::constants;
 
 std::unordered_map<int32_t, WsSessionPtr> GatewayPubSubManager::WebsockConnhash{};
 std::mutex GatewayPubSubManager::WebsockConnhashMutex{};
@@ -37,7 +39,7 @@ GatewayPubSubManager::GatewayPubSubManager() {
     this->sub_->on_message([this] (std::string channel, std::string msg) {
         std::string roomid = channel;
 
-        if(roomid.rfind(GatewaySubChannelPrefix, 0) == 0) roomid = channel.substr(5);
+        if(roomid.rfind(rediskey::GatewaySubChannelPrefix, 0) == 0) roomid = channel.substr(5);
 
         std::shared_ptr<std::string> shared_ws_frame = std::make_shared<std::string>(buildWebSocketFrame(msg, 0x02));
 
@@ -132,7 +134,7 @@ void GatewayPubSubManager::SubscribeRoomSafe(const std::string& roomid) {
     std::lock_guard<std::mutex> lock(GatewayPubSubManager::channel_mtx_);
     
     if(++GatewayPubSubManager::global_room_ref_count_[roomid] == 1) {
-        GatewayPubSubManager::pending_sub_channels_.push_back(RedisKey::GatewaySubRoomChannelKey(roomid));
+        GatewayPubSubManager::pending_sub_channels_.push_back(rediskey::RedisKey::GatewaySubRoomChannelKey(roomid));
     }
 }
 
@@ -143,7 +145,7 @@ void GatewayPubSubManager::UnSubscribeRoomSafe(const std::string& roomid) {
 
     if(it != GatewayPubSubManager::global_room_ref_count_.end()) {
         if(--it->second == 0) {
-            GatewayPubSubManager::pending_unsub_channels_.push_back(RedisKey::GatewaySubRoomChannelKey(roomid));
+            GatewayPubSubManager::pending_unsub_channels_.push_back(rediskey::RedisKey::GatewaySubRoomChannelKey(roomid));
             GatewayPubSubManager::global_room_ref_count_.erase(it);
         }
     }

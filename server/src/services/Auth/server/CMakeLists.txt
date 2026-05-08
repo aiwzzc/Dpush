@@ -1,17 +1,17 @@
 
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} SRC)
-aux_source_directory(${CMAKE_SOURCE_DIR}/src/base BASE)
 
 set(PROTO_SRC 
 ${CMAKE_SOURCE_DIR}/proto/auth.grpc.pb.cc 
 ${CMAKE_SOURCE_DIR}/proto/auth.pb.cc)
 
-add_executable(AuthServer ${SRC} ${BASE})
+add_executable(AuthServer ${SRC})
 
 target_include_directories(AuthServer PUBLIC 
 ${CMAKE_BINARY_DIR}/proto
 ${CMAKE_SOURCE_DIR}/src/db
 ${CMAKE_SOURCE_DIR}/src/base
+${CMAKE_SOURCE_DIR}/src/net
 )
 
 set(GRPC_LIBS
@@ -29,7 +29,7 @@ PRIVATE
     push_mysqlpool 
     push_crypto 
 
-    ${GRPC_LIBS} 
+    # ${GRPC_LIBS} 
     OpenSSL::SSL
     OpenSSL::Crypto
     ZLIB::ZLIB
@@ -40,4 +40,7 @@ PRIVATE
     hiredis  
     jwt 
     proto_gen
+    push_constants
+    etcd-cpp-api
+    push_etcdnode
 )

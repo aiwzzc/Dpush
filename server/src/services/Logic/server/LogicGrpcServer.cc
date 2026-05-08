@@ -2,12 +2,12 @@
 
 #include "room.grpc.pb.h"
 #include "room.pb.h"
-
 #include "chat_generated.h"
 
 #include "utils/SnowflakeIdWorker.h"
 #include "utils/types.h"
-#include "utils/RedisKey.h"
+
+#include "constants/RedisKey.h"
 
 #include "AsyncMySQLConnPool/AsyncMysqlConnPool.h"
 #include "AsyncMySQLConnPool/AsyncMysqlConn.h"
@@ -17,86 +17,25 @@
 #include <memory>
 #include <boost/asio.hpp>
 
-namespace {
-
-template <typename... Args>
-std::string FormatString(const std::string &format, Args... args) {
-    auto size = std::snprintf(nullptr, 0, format.c_str(), args...) + 1; // Extra space for '\0'
-    std::unique_ptr<char[]> buf(new char[size]);
-    std::snprintf(buf.get(), size, format.c_str(), args...);
-    return std::string(buf.get(), buf.get() + size - 1); // We don't want the '\0' inside
-}
-
-};
-
 LogicGrpcServer::LogicGrpcServer(asyncMysqlCluster* asyncmysql, 
 sw::redis::Redis* redis, ComputeThreadPool* thread) : 
 mysql_pool_(asyncmysql), redis_pool_(redis), thread_pool_(thread) {}
 LogicGrpcServer::~LogicGrpcServer() = default;
 
-static uint64_t getCurrentTimestamp() {
+namespace {
+
+uint64_t getCurrentTimestamp() {
     auto now = std::chrono::system_clock::time_point::clock::now();
     auto duration = now.time_since_epoch();
     auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration);
     return milliseconds.count(); //单位是毫秒
 }
 
-struct clearCursorsAwaiter {
-
-    sw::redis::Redis* redis_;
-    ComputeThreadPool* threadpool_;
-    int32_t userid_;
-
-    bool await_ready() const noexcept { return false; }
-    void await_suspend(std::coroutine_handle<> handle) {
-        this->threadpool_->submit([this, handle] () {
-            this->redis_->del(std::to_string(this->userid_));
-
-            handle.resume();
-        });
-    }
-
-    bool await_resume() { return true; }
 };
 
-struct GetRoomListAwaiter {
+using namespace pulse::constants;
 
-    int32_t userid_;
-    std::unordered_map<std::string, std::string>* roomlist_;
-    ComputeThreadPool* threadpool_;
-
-    bool await_ready() const noexcept { return false; }
-    void await_suspend(std::coroutine_handle<> handle) {
-        this->threadpool_->submit([this, handle] () {
-            auto channel = grpc::CreateChannel("127.0.0.1:5007", grpc::InsecureChannelCredentials());
-            std::unique_ptr<room::RoomServer::Stub> stub = room::RoomServer::NewStub(channel);
-
-            grpc::ClientContext ctx;
-            room::GetUserRoomListResponse res;
-            room::GetUserRoomListRequest req;
-            req.set_userid(this->userid_);
-
-            Status s = stub->GetUserRoomList(&ctx, req, &res);
-
-            if(s.ok()) {
-                for(const auto& roominfo : res.roomlist()) {
-                    std::string roomid = roominfo.room_id();
-                    std::size_t colon_pos = roomid.find(":");
-                    if(colon_pos == std::string::npos) continue;
-
-                    std::string real_roomid = roomid.substr(0, colon_pos);
-                    std::string real_roomname = roomid.substr(colon_pos + 1);
-
-                    this->roomlist_->insert({real_roomid, real_roomname});
-                }
-            }
-
-            handle.resume();
-        });
-    }
-
-    bool await_resume() { return true; }
-};
+namespace {
 
 struct GetUserCursors {
 
@@ -120,6 +59,10 @@ struct GetUserCursors {
 
 };
 
+GetUserCursors async_GetUserCursors_for_coro(ComputeThreadPool* threadpool, sw::redis::Redis* redis, const std::string& userid) {
+    return GetUserCursors(threadpool, redis, userid, {});
+}
+
 struct GetHistoryMessageAwaiter {
 
     using streamMsg = std::pair<std::string, std::unordered_map<std::string, std::string>>;
@@ -141,7 +84,7 @@ struct GetHistoryMessageAwaiter {
             std::string stream_ref = last_message_id.empty() ? "+" : "(" + last_message_id;
     
             std::vector<streamMsg> messages;
-            std::string messageKey = RedisKey::MessagePersistKey(this->roomid_);
+            std::string messageKey = rediskey::RedisKey::MessagePersistKey(this->roomid_);
 
             this->redis_->xrevrange(messageKey, stream_ref, "-", get_count, std::back_inserter(messages));
             if(!messages.empty()) this->redis_->hset(this->userid_, this->roomid_, messages.back().first);
@@ -177,89 +120,12 @@ struct GetHistoryMessageAwaiter {
 
 };
 
-struct PullMessageAwaiter {
-
-    using streamMsg = std::pair<std::string, std::unordered_map<std::string, std::string>>;
-
-    sw::redis::Redis* redis_;
-    ComputeThreadPool* thread_pool_;
-    std::string_view room_id_;
-    int64_t message_id_;
-    std::vector<streamMsg> messages_;
-
-    bool await_ready() const noexcept { return false; }
-    void await_suspend(std::coroutine_handle<> handle) {
-        this->thread_pool_->submit([this, handle] () {
-            std::string messageKey = RedisKey::MessagePersistKey(this->room_id_);
-            std::string stream_ref;
-            int get_count = 50;
-
-            if(message_id_ >= 0) {
-                stream_ref = "(" + std::to_string(message_id_);
-                this->redis_->xrange(messageKey, stream_ref, "+", get_count, std::back_inserter(this->messages_));
-
-            } else {
-                stream_ref = "+";
-                this->redis_->xrevrange(messageKey, stream_ref, "-", get_count, std::back_inserter(this->messages_));
-            }
-
-            handle.resume();
-        });
-    }
-
-    std::vector<streamMsg> await_resume() { return this->messages_; }
-};
-
-struct addSessionToRedisAwaiter {
-
-    sw::redis::Redis* redis_;
-    ComputeThreadPool* thread_pool_;
-    int32_t userid_;
-    int64_t room_id_;
-
-    bool await_ready() const noexcept { return false; }
-    void await_suspend(std::coroutine_handle<> handle) {
-        this->thread_pool_->submit([this, handle] () {
-            auto pipe = this->redis_->pipeline();
-            std::string user_rooms_key = RedisKey::UserJoinedSessionKey(this->userid_);
-
-            pipe.sadd(user_rooms_key, std::to_string(this->room_id_));
-            pipe.expire(user_rooms_key, 604800);
-            pipe.exec();
-
-            handle.resume();
-        });
-    }
-
-    void await_resume() {}
-};
-
-clearCursorsAwaiter async_clearCursors_for_coro(sw::redis::Redis* redis, ComputeThreadPool* threadpool, int32_t& userid) {
-    return clearCursorsAwaiter{redis, threadpool, userid};
-}
-
-GetRoomListAwaiter async_getRoomList_for_coro(const int32_t& userid, std::unordered_map<std::string, std::string>* roomlist, 
-ComputeThreadPool* threadpool) {
-    return GetRoomListAwaiter{userid, roomlist, threadpool};
-}
-
-GetUserCursors async_GetUserCursors_for_coro(ComputeThreadPool* threadpool, sw::redis::Redis* redis, const std::string& userid) {
-    return GetUserCursors(threadpool, redis, userid, {});
-}
-
 GetHistoryMessageAwaiter async_GerHistoryMessage_for_coro(ComputeThreadPool* threadpool, sw::redis::Redis* redis, const std::string& userid, 
 const std::string& roomid, std::unordered_map<std::string, std::string>& cursors, int messagecount) {
     return GetHistoryMessageAwaiter{threadpool, redis, userid, roomid, cursors, messagecount, {}};
 }
 
-PullMessageAwaiter async_PullMessage_for_coro(sw::redis::Redis* redis, ComputeThreadPool* threadpool, std::string_view room_id, int64_t& msgid) {
-    return PullMessageAwaiter{redis, threadpool, room_id, msgid, {}};
-}
-
-addSessionToRedisAwaiter async_AddSessionToRedis_for_coro(sw::redis::Redis* redis, ComputeThreadPool* threadpool, 
-    int32_t userid, int64_t room_id) {
-    return addSessionToRedisAwaiter{redis, threadpool, userid, room_id};
-}
+};
 
 grpc::ServerUnaryReactor* LogicGrpcServer::clientMessage(grpc::CallbackServerContext* context, const logic::clientMessageRequest* request, 
     logic::clientMessageResponse* response) {
@@ -363,6 +229,32 @@ DetachedTask LogicGrpcServer::DoclientMessage(grpc::ServerUnaryReactor* reactor,
     reactor->Finish(grpc::Status::OK);
 }
 
+namespace {
+
+struct clearCursorsAwaiter {
+
+    sw::redis::Redis* redis_;
+    ComputeThreadPool* threadpool_;
+    int32_t userid_;
+
+    bool await_ready() const noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> handle) {
+        this->threadpool_->submit([this, handle] () {
+            this->redis_->del(std::to_string(this->userid_));
+
+            handle.resume();
+        });
+    }
+
+    bool await_resume() { return true; }
+};
+
+clearCursorsAwaiter async_clearCursors_for_coro(sw::redis::Redis* redis, ComputeThreadPool* threadpool, int32_t& userid) {
+    return clearCursorsAwaiter{redis, threadpool, userid};
+}
+
+};
+
 grpc::ServerUnaryReactor* LogicGrpcServer::clearCursors(grpc::CallbackServerContext* context, const logic::clearCursorsRequest* request, 
     logic::clearCursorsResponse* response) {
 
@@ -381,6 +273,47 @@ DetachedTask LogicGrpcServer::DoclearCursors(grpc::ServerUnaryReactor* reactor, 
 
     reactor->Finish(grpc::Status::OK);
 }
+
+namespace {
+
+struct PullMessageAwaiter {
+
+    using streamMsg = std::pair<std::string, std::unordered_map<std::string, std::string>>;
+
+    sw::redis::Redis* redis_;
+    ComputeThreadPool* thread_pool_;
+    std::string_view room_id_;
+    int64_t message_id_;
+    std::vector<streamMsg> messages_;
+
+    bool await_ready() const noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> handle) {
+        this->thread_pool_->submit([this, handle] () {
+            std::string messageKey = rediskey::RedisKey::MessagePersistKey(this->room_id_);
+            std::string stream_ref;
+            int get_count = 50;
+
+            if(message_id_ >= 0) {
+                stream_ref = "(" + std::to_string(message_id_);
+                this->redis_->xrange(messageKey, stream_ref, "+", get_count, std::back_inserter(this->messages_));
+
+            } else {
+                stream_ref = "+";
+                this->redis_->xrevrange(messageKey, stream_ref, "-", get_count, std::back_inserter(this->messages_));
+            }
+
+            handle.resume();
+        });
+    }
+
+    std::vector<streamMsg> await_resume() { return this->messages_; }
+};
+
+PullMessageAwaiter async_PullMessage_for_coro(sw::redis::Redis* redis, ComputeThreadPool* threadpool, std::string_view room_id, int64_t& msgid) {
+    return PullMessageAwaiter{redis, threadpool, room_id, msgid, {}};
+}
+
+};
 
 BatchPullReactor::BatchPullReactor(const logic::bathPullMessageRequest* req, sw::redis::Redis* redis, ComputeThreadPool* threadpool) :
 request_(req), redis_pool_(redis), thread_pool_(threadpool) {
@@ -470,6 +403,51 @@ grpc::ServerUnaryReactor* LogicGrpcServer::joinSession(grpc::CallbackServerConte
 
     return reactor;
 }
+
+namespace {
+
+template <typename... Args>
+std::string FormatString(const std::string &format, Args... args) {
+    auto size = std::snprintf(nullptr, 0, format.c_str(), args...) + 1;
+    std::unique_ptr<char[]> buf(new char[size]);
+    std::snprintf(buf.get(), size, format.c_str(), args...);
+    return std::string(buf.get(), buf.get() + size - 1);
+}
+
+};
+
+namespace {
+
+struct addSessionToRedisAwaiter {
+
+    sw::redis::Redis* redis_;
+    ComputeThreadPool* thread_pool_;
+    int32_t userid_;
+    int64_t room_id_;
+
+    bool await_ready() const noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> handle) {
+        this->thread_pool_->submit([this, handle] () {
+            auto pipe = this->redis_->pipeline();
+            std::string user_rooms_key = rediskey::RedisKey::UserJoinedSessionKey(this->userid_);
+
+            pipe.sadd(user_rooms_key, std::to_string(this->room_id_));
+            pipe.expire(user_rooms_key, 604800);
+            pipe.exec();
+
+            handle.resume();
+        });
+    }
+
+    void await_resume() {}
+};
+
+addSessionToRedisAwaiter async_AddSessionToRedis_for_coro(sw::redis::Redis* redis, ComputeThreadPool* threadpool, 
+    int32_t userid, int64_t room_id) {
+    return addSessionToRedisAwaiter{redis, threadpool, userid, room_id};
+}
+
+};
 
 DetachedTask LogicGrpcServer::DojoinSession(grpc::ServerUnaryReactor* reactor, const logic::joinSessionRequest* request, 
     logic::joinSessionResponse* response) {

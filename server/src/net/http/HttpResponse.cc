@@ -6,7 +6,7 @@ HttpResponse::~HttpResponse() = default;
 void HttpResponse::setStatusCode(HttpStatusCode code) 
 { this->statusCode_ = code; }
 
-void HttpResponse::setStatusMessage(const std::string& statusMessage) 
+void HttpResponse::setStatusMessage(std::string_view statusMessage) 
 { this->statusMessage_.assign(statusMessage); }
 
 void HttpResponse::setCloseConnection(bool on) { this->closeConnection_ = on; }

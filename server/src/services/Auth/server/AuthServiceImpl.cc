@@ -1,6 +1,8 @@
 #include "AuthServiceImpl.h"
-#include "utils/RedisKey.h"
+#include "constants/protocol_fields.h"
 #include <jwt.h>
+
+using namespace pulse::constants;
 
 struct QueryAwaiter {
 
@@ -193,9 +195,9 @@ DetachedTask AuthService::DoLoginAsync(const auth::LoginRequest* request, auth::
             co_return;
         }
 
-        jwt_add_grant_int(jwt, USER_ID.data(), userid);
-        jwt_add_grant(jwt, USERNAME.data(), username.c_str());
-        jwt_add_grant_int(jwt, EXPIRE.data(), (long)time(NULL) + 3600 * 24); 
+        jwt_add_grant_int(jwt, protocol::USER_ID.data(), userid);
+        jwt_add_grant(jwt, protocol::USERNAME.data(), username.c_str());
+        jwt_add_grant_int(jwt, protocol::EXPIRE.data(), (long)time(NULL) + 3600 * 24); 
 
         jwt_set_alg(jwt, JWT_ALG_RS256, (unsigned char*)this->private_key, strlen(this->private_key));
 

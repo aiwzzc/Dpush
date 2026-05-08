@@ -6,9 +6,13 @@
 #include "concurrency/coroutineTask.h"
 
 #include "utils/types.h"
-#include "utils/RedisKey.h"
+
+#include "constants/RedisKey.h"
+#include "constants/protocol_fields.h"
 
 #include "chat_generated.h"
+
+using namespace pulse::constants;
 
 KafkaConsumer::KafkaConsumer(const std::string& brokers, const std::string& group_id, 
     const std::vector<std::string>& topics, OrderedThreadPool* ordthreadpool, 
@@ -123,16 +127,16 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
 
     auto header_list = header->get_all();
     for(const auto& hdr : header_list) {
-        if(hdr.key() == USER_ID) {
+        if(hdr.key() == protocol::USER_ID) {
             userid_str = std::string(static_cast<const char*>(hdr.value()), hdr.value_size());
             userid = std::stoi(userid_str);
 
-        } else if(hdr.key() == USERNAME) {
+        } else if(hdr.key() == protocol::USERNAME) {
             username.assign(std::string(static_cast<const char*>(hdr.value()), hdr.value_size()));
         }
     }
 
-    std::vector<std::string> keys{RedisKey::ClientMsgIdKey(kafka_key), RedisKey::MessageSeqIdKey(kafka_key)};
+    std::vector<std::string> keys{rediskey::RedisKey::ClientMsgIdKey(kafka_key), rediskey::RedisKey::MessageSeqIdKey(kafka_key)};
     std::vector<std::string> args{std::string(clientMessageId.data(), clientMessageId.size()), "1"};
 
     std::vector<long long> returned_msgids;
@@ -190,23 +194,23 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
         auto pipe = this->redis_pool_->pipeline();
 
         std::vector<std::pair<std::string, std::string_view>> stream_fields{
-            {MessagePersistfield.data(), fb_binary}
+            {rediskey::MessagePersistfield.data(), fb_binary}
         };
 
         long long max_seq_id = returned_msgids.back();
-        std::string stream_id = RedisKey::MessagePersistMsgId(max_seq_id);
+        std::string stream_id = rediskey::RedisKey::MessagePersistMsgId(max_seq_id);
 
-        pipe.xadd(RedisKey::MessagePersistKey(kafka_key), stream_id, stream_fields.begin(), stream_fields.end(), 500);
+        pipe.xadd(rediskey::RedisKey::MessagePersistKey(kafka_key), stream_id, stream_fields.begin(), stream_fields.end(), 500);
 
         if(chat_type == ChatApp::ChatType::ChatType_Group) {
-            pipe.publish(RedisKey::GatewaySubRoomChannelKey(kafka_key), fb_binary);
+            pipe.publish(rediskey::RedisKey::GatewaySubRoomChannelKey(kafka_key), fb_binary);
 
             pipe.exec();
 
         } else if(chat_type == ChatApp::ChatType::ChatType_Single) {
 
-            std::string sender_route_key = RedisKey::UserRouteGatewayKey(userid_str);
-            std::string target_route_key = RedisKey::UserRouteGatewayKey(target_id);
+            std::string sender_route_key = rediskey::RedisKey::UserRouteGatewayKey(userid_str);
+            std::string target_route_key = rediskey::RedisKey::UserRouteGatewayKey(target_id);
 
             pipe.get(sender_route_key);
             pipe.get(target_route_key);

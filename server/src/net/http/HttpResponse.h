@@ -21,7 +21,7 @@ public:
     ~HttpResponse();
 
     void setStatusCode(HttpStatusCode code);
-    void setStatusMessage(const std::string& statusMessage);
+    void setStatusMessage(std::string_view statusMessage);
     void setCloseConnection(bool on);
     void setContentType(const std::string& contentType);
     void setCookie(const std::string& cookie);

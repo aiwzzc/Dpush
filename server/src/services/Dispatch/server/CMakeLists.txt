@@ -20,4 +20,6 @@ PUBLIC
     hiredis 
     push_yyjson
     push_http
+    push_constants
+    push_etcdnode
 )

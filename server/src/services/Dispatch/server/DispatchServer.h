@@ -20,7 +20,10 @@
 #include "logic.grpc.pb.h"
 #include "logic.pb.h"
 
+#include <grpcpp/grpcpp.h>
+
 #include "concurrency/coroutineTask.h"
+#include "etcdServiceNode/ServiceRegistry.h"
 
 class HttpRequest;
 class HttpResponse;
@@ -69,9 +72,6 @@ public:
         Unknown_error
     };
 
-    // static std::optional<api_error_id> to_api_error_id(int v);
-    // static std::string api_error_id_to_string(api_error_id id);
-
     dispatchServer(const std::string& etcd_url);
     ~dispatchServer();
 
@@ -79,28 +79,82 @@ public:
 
 private:
     void BackendSyncTask();
-    void onetcdWatcher(const etcd::Response& response);
     DetachedTask onDispatch(TcpConnectionPtr conn, HttpRequest req);
     DetachedTask onLogin(TcpConnectionPtr conn, HttpRequest req);
     DetachedTask onRegister(TcpConnectionPtr conn, HttpRequest req);
     DetachedTask onjoinSession(TcpConnectionPtr conn, HttpRequest req);
     DetachedTask oncreateSession(TcpConnectionPtr conn, HttpRequest req);
 
-    std::string etcd_url_;
-    std::string watch_prefix_{"/services/gateway/"};
+private:
 
-    std::shared_ptr<etcd::Client> etcd_client_;
-    std::unique_ptr<etcd::Watcher> etcd_watcher_;
+    template<typename StubMap, typename StubFactory>
+    void addStub(StubMap& stubmap, std::shared_mutex& mutex, 
+        const std::string& endpoint, StubFactory&& factory) {
+
+        std::unique_lock<std::shared_mutex> lock(mutex);
+
+        if(stubmap.contains(endpoint)) return;
+
+        auto channel = grpc::CreateChannel(endpoint, grpc::InsecureChannelCredentials());
+        stubmap[endpoint] = factory(channel);
+    }
+
+    template<typename StubMap>
+    void removeStub(StubMap& stubmap, std::shared_mutex& mutex, const std::string& endpoint) {
+        std::unique_lock<std::shared_mutex> lock(mutex);
+        stubmap.erase(endpoint);
+    }
+
+    template<typename StubMap, typename StubFactory>
+    void onWatcher(const etcd::Event& event, const std::string& service_prefix, 
+        StubMap& stubmap, std::shared_mutex& mutex, StubFactory&& factory) {
+
+        std::string key = event.kv().key();
+        std::string endpoint = key.substr(service_prefix.length());
+
+        auto type = event.event_type();
+
+        if(type == etcd::Event::EventType::DELETE_) {
+            removeStub(stubmap, mutex, endpoint);
+
+            return;
+        }
+
+        if(type == etcd::Event::EventType::PUT) {
+            addStub(stubmap, mutex, endpoint, factory);
+        }
+    }
+
+private:
+    using AuthStub = std::unique_ptr<auth::AuthServer::Stub>;
+    using LogicStub = std::unique_ptr<logic::LogicServer::Stub>;
+
+    std::string etcd_url_;
+    std::string gateway_prefix_{"/services/gateway/"};
+    std::string auth_prefix_{"/services/auth/"};
+    std::string logic_prefix_{"/services/logic/"};
+
+    // std::shared_ptr<etcd::Client> etcd_client_;
+    // std::unique_ptr<etcd::Watcher> etcd_watcher_;
     std::unique_ptr<HttpServer> server_;
 
-    std::shared_ptr<grpc::Channel> Authchannel;
-    std::unique_ptr<auth::AuthServer::Stub> Authstub;
+    // std::shared_ptr<grpc::Channel> Authchannel;
+    // std::unique_ptr<auth::AuthServer::Stub> Authstub;
 
-    std::shared_ptr<grpc::Channel> Logicchannel;
-    std::unique_ptr<logic::LogicServer::Stub> Logicstub;
+    // std::shared_ptr<grpc::Channel> Logicchannel;
+    // std::unique_ptr<logic::LogicServer::Stub> Logicstub;
 
-    std::unordered_set<std::string> etcd_conns_;
-    std::shared_mutex etcd_conns_mutex_;
+    // std::unordered_set<std::string> etcd_conns_;
+    // std::shared_mutex etcd_conns_mutex_;
+
+    std::shared_mutex auth_stubs_mutex_;
+    std::unordered_map<std::string, AuthStub> auth_stubs_;
+
+    std::shared_mutex logic_stubs_mutex_;
+    std::unordered_map<std::string, LogicStub> logic_stubs_;
+
+    pulse::net::ServiceRegistryClient ServiceRegistryClient_;
+
     std::vector<GatewayInfo> cached_gateways_;
     std::shared_mutex cache_mutex_;
 

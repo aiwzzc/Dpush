@@ -1,4 +1,5 @@
 #include "AuthServiceImpl.h"
+#include "AuthServer.h"
 
 #include <sw/redis++/redis++.h>
 #include <memory>
@@ -25,6 +26,9 @@ int main() {
     ServerBuilder builder;
     builder.AddListeningPort("0.0.0.0:5006", grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
+
+    AuthServer authServer{"127.0.0.1:2379"};
+    authServer.start();
 
     std::unique_ptr<Server> server(builder.BuildAndStart());
     if(!server) {

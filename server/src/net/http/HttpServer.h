@@ -83,12 +83,12 @@ public:
     // void setHttpCallback(const HttpCallback& cb);
     void setThreadInitCallback(const ThreadInitCallback& cb);
     void Get(const std::string& path, const HttpCallback& cb);
-    void GetAsync(const std::string& path, const AsyncHttpCallback& cb);
+    void GetAsync(std::string_view path, const AsyncHttpCallback& cb);
 
 private:
 
     std::unordered_map<std::string, HttpCallback> routes;
-    std::unordered_map<std::string, AsyncHttpCallback> coro_routes;
+    std::unordered_map<std::string_view, AsyncHttpCallback> coro_routes;
 
     void onConnection(const TcpConnectionPtr& conn);
     void onMessage(const TcpConnectionPtr& conn, muduo::net::Buffer* buf);

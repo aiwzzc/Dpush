@@ -12,10 +12,15 @@
 #include "grpcClient.h"
 #include "producer.h"
 #include "config.h"
-#include "utils/RedisKey.h"
+
+#include "constants/ws_constants.h"
+#include "constants/protocol_fields.h"
+#include "constants/http_constants.h"
 
 #include <openssl/sha.h>
 #include <jwt.h>
+
+using namespace pulse::constants;
 
 using EventLoop = muduo::net::EventLoop;
 using TcpServer = muduo::net::TcpServer;
@@ -215,7 +220,7 @@ void wsServer::dispatchEvent(const TcpConnectionPtr& conn, const std::vector<std
             case ChatApp::AnyPayload_SignalingFromClientPayload: {
                 auto payload = rootMsg->payload_as_SignalingFromClientPayload();
                 std::string_view action_type_str(payload->action()->c_str(), payload->action()->size());
-                if(action_type_str == SignalCreateSessionReq) {
+                if(action_type_str == ws::SignalCreateSessionReq) {
                     std::string room_id(payload->room_id()->c_str(), payload->room_id()->size());
 
                     this->wsContext_.grpcClient_->rpcIsSubSessionAsync(session->userid(), room_id, 
@@ -232,7 +237,7 @@ void wsServer::dispatchEvent(const TcpConnectionPtr& conn, const std::vector<std
             case ChatApp::AnyPayload_SignalingFromClientJoinPayload: {
                 auto payload = rootMsg->payload_as_SignalingFromClientJoinPayload();
                 std::string_view action_type_str(payload->action()->c_str(), payload->action()->size());
-                if(action_type_str == SignalJoinSessionReq) {
+                if(action_type_str == ws::SignalJoinSessionReq) {
                     std::string room_id(payload->room_id()->c_str(), payload->room_id()->size());
                     int64_t roomid = std::stol(room_id);
                     std::string room_name(payload->room_name()->c_str(), payload->room_name()->size());
@@ -271,10 +276,10 @@ void wsServer::onConnection(const muduo::net::TcpConnectionPtr& conn) {
 }
 
 static std::string AnalysisCookie(const std::string& header) {
-    std::size_t cookie_start = header.find("Cookie");
+    std::size_t cookie_start = header.find(http::KCOOKIE);
     if(cookie_start == std::string::npos) return {};
 
-    std::size_t cookie_end = header.find("\r\n", cookie_start);
+    std::size_t cookie_end = header.find(http::kCRLF, cookie_start);
     if(cookie_end == std::string::npos) return {};
 
     std::string cookieFields = header.substr(cookie_start, cookie_end - cookie_start);
@@ -293,11 +298,13 @@ static std::string AnalysisCookie(const std::string& header) {
     return cookieFields.substr(start, end - start);
 }
 
-static std::string HandleUpgradeResponse(const std::string& header) {
-    std::string key_target = "Sec-WebSocket-Key:";
+namespace {
+
+std::string HandleUpgradeResponse(const std::string& header) {
+    std::string_view key_target = http::HEADER_WS_KEY;
 
     std::size_t pos = header.find(key_target);
-    if(pos == std::string::npos) return "HTTP/1.1 400 Bad Request\r\n\r\n";
+    if(pos == std::string::npos) return std::string(http::RESP_400_BAD_REQUEST);
 
     pos += key_target.length();
 
@@ -305,26 +312,24 @@ static std::string HandleUpgradeResponse(const std::string& header) {
         pos++;
     }
 
-    std::size_t end = header.find("\r\n", pos);
-    if(end == std::string::npos) return "HTTP/1.1 400 Bad Request\r\n\r\n";
+    std::size_t end = header.find(http::kCRLF, pos);
+    if(end == std::string::npos) return std::string(http::RESP_400_BAD_REQUEST);
 
     std::string cli_websocket_key = header.substr(pos, end - pos);
-    if(cli_websocket_key.empty()) return "HTTP/1.1 400 Bad Request\r\n\r\n";
+    if(cli_websocket_key.empty()) return std::string(http::RESP_400_BAD_REQUEST);
     
-    cli_websocket_key += "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    cli_websocket_key += std::string(ws::WS_GUID);
 
     unsigned char sha1[20]; //openssl的库
     SHA1(reinterpret_cast<const unsigned char*>(cli_websocket_key.data()), cli_websocket_key.size(), sha1);
 
     std::string accept = base64_encode(sha1, 20); //base 64编码
-    std::string response =
-        "HTTP/1.1 101 Switching Protocols\r\n"
-        "Upgrade: websocket\r\n"
-        "Connection: Upgrade\r\n"
-        "Sec-WebSocket-Accept: " + accept + "\r\n\r\n";
+    std::string response = ws::buildHandshakeResponse(accept);
 
     return response;
 }
+
+};
 
 bool wsServer::processHandshake(const std::string& header, const muduo::net::TcpConnectionPtr& conn) {
     if (header.find("GET") != 0) return false;
@@ -342,15 +347,14 @@ bool wsServer::processHandshake(const std::string& header, const muduo::net::Tcp
     if(jwt_decode(&decoded, cookie.c_str(), (unsigned char*)GatewayServer::public_key, 
     strlen(GatewayServer::public_key)) != 0) return false;
 
-    int32_t userid = jwt_get_grant_int(decoded, USER_ID.data());
-    const char* uname_ptr = jwt_get_grant(decoded, USERNAME.data());
+    int32_t userid = jwt_get_grant_int(decoded, protocol::USER_ID.data());
+    const char* uname_ptr = jwt_get_grant(decoded, protocol::USERNAME.data());
     std::string username = uname_ptr ? uname_ptr : "";
     
     jwt_free(decoded);
     if(username.empty()) return false;
 
     std::string upgrade_resp = HandleUpgradeResponse(header);
-    // 这里建议加一个判断，如果 HandleUpgradeResponse 返回的是 400，也应该拦截
     if (upgrade_resp.find("101") == std::string::npos) {
         return false; 
     }
@@ -382,7 +386,7 @@ void wsServer::onMessage(const TcpConnectionPtr& conn, Buffer* buffer) {
                 if(buffer->readableBytes() == 0) return;
 
             } else {
-                conn->send("HTTP/1.1 401 Unauthorized\r\n\r\n");
+                conn->send(std::string(http::RESP_401_UNAUTH));
                 conn->forceClose();
 
                 return;

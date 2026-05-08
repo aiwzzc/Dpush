@@ -38,7 +38,7 @@ void HttpServer::Get(const std::string& path, const HttpCallback& cb) {
     }
 }
 
-void HttpServer::GetAsync(const std::string& path, const AsyncHttpCallback& cb) {
+void HttpServer::GetAsync(std::string_view path, const AsyncHttpCallback& cb) {
     auto it = this->coro_routes.find(path);
     if(it == this->coro_routes.end()) {
         this->coro_routes[path] = std::move(cb);

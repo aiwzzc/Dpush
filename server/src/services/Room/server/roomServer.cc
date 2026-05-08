@@ -1,10 +1,13 @@
 #include "roomServer.h"
 #include "chat_generated.h"
 
-#include "utils/RedisKey.h"
+#include "constants/RedisKey.h"
+#include "constants/ws_constants.h"
 
 #include <unordered_set>
 #include <iostream>
+
+using namespace pulse::constants;
 
 RoomServer::RoomServer(sw::redis::Redis* redis) : redis_pool_(redis) {}
 RoomServer::~RoomServer() = default;
@@ -16,7 +19,7 @@ Status RoomServer::GetUserRoomList(::grpc::ServerContext* context, const ::room:
     int32_t user_id = request->userid();
     std::string user_id_str = std::to_string(user_id);
 
-    std::string user_rooms_key = RedisKey::UserJoinedSessionKey(user_id);
+    std::string user_rooms_key = rediskey::RedisKey::UserJoinedSessionKey(user_id);
     this->redis_pool_->smembers(user_rooms_key, std::inserter(roomlists, roomlists.begin()));
 
     for(const auto& room_id : roomlists) {
@@ -24,7 +27,7 @@ Status RoomServer::GetUserRoomList(::grpc::ServerContext* context, const ::room:
         info->set_room_id(room_id);
     }
 
-    std::string user_gateway_key = RedisKey::UserRouteGatewayKey(user_id_str);
+    std::string user_gateway_key = rediskey::RedisKey::UserRouteGatewayKey(user_id_str);
     const std::string& gateway_addr = request->gatewayip();
     this->redis_pool_->set(user_gateway_key, gateway_addr);
     this->redis_pool_->expire(user_gateway_key, 3600);
@@ -69,16 +72,16 @@ Status RoomServer::IsSubRoom(::grpc::ServerContext* context, const ::room::IsSub
 
     int32_t userid = request->userid();
     std::string room_id = request->room_id();
-    std::string user_rooms_key = RedisKey::UserJoinedSessionKey(userid);
+    std::string user_rooms_key = rediskey::RedisKey::UserJoinedSessionKey(userid);
 
     bool exist = this->redis_pool_->sismember(user_rooms_key, room_id);
     
     thread_local flatbuffers::FlatBufferBuilder builder(4096);
     builder.Clear();
 
-    auto action_offset = builder.CreateString(SignalCreateSessionRes);
+    auto action_offset = builder.CreateString(ws::SignalCreateSessionRes);
     auto room_id_offset = builder.CreateString(room_id);
-    auto status_offset = builder.CreateString(exist ? OK : FALSE);
+    auto status_offset = builder.CreateString(exist ? ws::OK : ws::FALSE);
 
     ChatApp::SignalingFromServerPayloadBuilder sigServerBuilder(builder);
     sigServerBuilder.add_action(action_offset);

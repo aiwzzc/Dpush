@@ -1,5 +1,7 @@
 #include "RedisKey.h"
 
+namespace pulse::constants::rediskey {
+
 std::string RedisKey::UserRouteGatewayKey(std::string_view uid){
     return "{route:uid:" + std::string(uid) + "}";
 }
@@ -27,3 +29,6 @@ std::string RedisKey::ClientMsgIdKey(std::string_view session_id){
 std::string RedisKey::MessageSeqIdKey(std::string_view session_id){
     return "room_seq:{" + std::string(session_id) + "}";
 }
+
+}; // namespace pulse::constants::rediskey
+

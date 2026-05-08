@@ -18,6 +18,7 @@ ${CMAKE_BINARY_DIR}/proto
 ${CMAKE_SOURCE_DIR}/src/base
 ${CMAKE_BINARY_DIR}/fbs 
 ${CMAKE_SOURCE_DIR}/src/db
+${CMAKE_SOURCE_DIR}/src/net
 )
 
 set(GRPC_LIBS
@@ -45,6 +46,8 @@ PRIVATE
     proto_gen
     push_asyncmysqlpool
     push_utils
+    push_constants
+    push_etcdnode
     etcd-cpp-api
     cpprest
 )

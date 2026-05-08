@@ -6,7 +6,10 @@
 #include <etcd/Client.hpp>
 #include <etcd/Watcher.hpp>
 
+#include "etcdServiceNode/ServiceRegistry.h"
+
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <memory>
@@ -23,17 +26,17 @@ private:
 
     using GatewayStub = std::shared_ptr<gateway::GatewayServer::Stub>;
 
-    void etcdWatcherCallback(const etcd::Response& response);
+    void etcdWatcherCallback(const etcd::Event& event);
     void addGatewayStub(const std::string& ip_port);
     void removeGatewayStub(const std::string& ip_port);
     GatewayStub getStub(const std::string& ip_port);
 
     std::string etcd_url_;
     std::string watch_prefix_{"/services/gateway/"};
-    std::shared_ptr<etcd::Client> etcd_client_;
-    std::unique_ptr<etcd::Watcher> etcd_watcher_;
 
-    std::mutex mutex_;
+    pulse::net::ServiceRegistryClient ServiceRegistryClient_;
+
+    std::shared_mutex gateway_stubs_mutex_;
     std::unordered_map<std::string, GatewayStub> gateway_stubs_;
 
 };

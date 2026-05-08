@@ -1,6 +1,8 @@
 #include "producer.h"
 #include "chat_generated.h"
-#include "utils/RedisKey.h"
+#include "constants/protocol_fields.h"
+
+using namespace pulse::constants;
 
 kafkaProducer::kafkaProducer() : my_dr_cb_(std::make_unique<MyDeliveryReportCb>()) { this->init_kafka(); }
 kafkaProducer::~kafkaProducer() = default;
@@ -91,8 +93,8 @@ RdKafka::ErrorCode kafkaProducer::produce(const std::string& topic, const char* 
     
     RdKafka::Headers* header = RdKafka::Headers::create();
 
-    header->add(USER_ID.data(), std::to_string(userid));
-    header->add(USERNAME.data(), username);
+    header->add(protocol::USER_ID.data(), std::to_string(userid));
+    header->add(protocol::USERNAME.data(), username);
 
     RdKafka::ErrorCode err = this->producer_->produce(topic, RdKafka::Topic::PARTITION_UA, RdKafka::Producer::RK_MSG_COPY,
     const_cast<char*>(data), data_len, key.c_str(), key_len, 0, header, ctx);

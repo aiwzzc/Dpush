@@ -56,6 +56,7 @@ PRIVATE
     cpprest 
     proto_gen  
     push_utils
+    push_constants
     ryml 
     ${JEMALLOC_LIBRARIES}
 )

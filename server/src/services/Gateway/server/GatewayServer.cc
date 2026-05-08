@@ -4,9 +4,13 @@
 #include "heartbeatManager.h"
 #include "config.h"
 #include "yyjson/JsonView.h"
-#include "utils/RedisKey.h"
+#include "constants/RedisKey.h"
 
-static char* read_file(const char* filename) {
+using namespace pulse::constants;
+
+namespace {
+
+char* read_file(const char* filename) {
     FILE* f = fopen(filename, "rb");
     if (!f) {
         perror("fopen");
@@ -29,6 +33,8 @@ static char* read_file(const char* filename) {
     fclose(f);
     return buf;
 }
+
+};
 
 extern thread_local std::unique_ptr<ThreadLocalUring> t_uring_ptr;
 extern thread_local std::unique_ptr<heartbeatManager> t_heartbeatManager_ptr;
@@ -144,7 +150,7 @@ void GatewayServer::collect_load_to_spsc() {
 }
 
 void GatewayServer::write_load_to_redis(GatewayLoad& load) {
-    this->redisPool_->hset(GatewayLoadKey, Config::getInstance().addr_, build_load_json(load));
+    this->redisPool_->hset(rediskey::GatewayLoadKey, Config::getInstance().addr_, build_load_json(load));
 }
 
 void GatewayServer::start() {
