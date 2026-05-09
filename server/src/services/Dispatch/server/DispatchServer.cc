@@ -1,33 +1,25 @@
 #include "DispatchServer.h"
 #include "yyjson/JsonView.h"
 
-#include "http/HttpRequest.h"
-#include "http/HttpResponse.h"
 #include "muduo/base/Logging.h"
 #include "muduo/net/InetAddress.h"
 
 #include "chat_generated.h"
+#include "fbs/http_codec.h"
 
 #include "constants/RedisKey.h"
-#include "constants/http_constants.h"
 
 #include <coroutine>
 
 using namespace pulse::constants;
+using namespace pulse::protocol;
 
 dispatchServer::dispatchServer(const std::string& etcd_url) :
 etcd_url_(etcd_url), ServiceRegistryClient_(etcd_url) {
 
     muduo::Logger::setLogLevel(muduo::Logger::FATAL);
 
-    // this->etcd_client_ = std::make_shared<etcd::Client>(this->etcd_url_);
     this->server_ = std::make_unique<HttpServer>(muduo::net::InetAddress{"0.0.0.0", 5001}, "HttpServer", 6);
-
-    // this->Authchannel = grpc::CreateChannel("127.0.0.1:5006", grpc::InsecureChannelCredentials());
-    // this->Authstub = auth::AuthServer::NewStub(this->Authchannel);
-
-    // this->Logicchannel = grpc::CreateChannel("127.0.0.1:5008", grpc::InsecureChannelCredentials());
-    // this->Logicstub = logic::LogicServer::NewStub(this->Logicchannel);
 
     sw::redis::ConnectionOptions connection_options;
     connection_options.host = "127.0.0.1";
@@ -38,6 +30,43 @@ etcd_url_(etcd_url), ServiceRegistryClient_(etcd_url) {
     pool_options.size = 3;
 
     this->redisPool_ = std::make_unique<sw::redis::Redis>(connection_options, pool_options);
+
+    this->HttpApiRoutes_ = {
+        {
+            pulse::constants::http::DISPATCH_API_PATH,
+            [this] (const TcpConnectionPtr& conn, const HttpRequest& req) {
+                return this->onDispatch(conn, std::move(req));
+            }
+        },
+
+        {
+            pulse::constants::http::LOGIN_API_PATH,
+            [this] (const TcpConnectionPtr& conn, const HttpRequest& req) {
+                return this->onLogin(conn, std::move(req));
+            }
+        },
+
+        {
+            pulse::constants::http::REGISTER_API_PATH,
+            [this] (const TcpConnectionPtr& conn, const HttpRequest& req) {
+                return this->onRegister(conn, req);
+            }
+        },
+
+        {
+            pulse::constants::http::JOINSESSION_API_PATH,
+            [this] (const TcpConnectionPtr& conn, const HttpRequest& req) {
+                return this->onjoinSession(conn, req);
+            }
+        },
+
+        {
+            pulse::constants::http::CREATESESSION_API_PATH,
+            [this] (const TcpConnectionPtr& conn, const HttpRequest& req) {
+                return this->oncreateSession(conn, req);
+            }
+        }
+    };
 }
 
 dispatchServer::~dispatchServer() {
@@ -76,59 +105,12 @@ void dispatchServer::BackendSyncTask() {
     }
 }
 
-namespace {
-
-bool req_is_close(const HttpRequest& req) {
+DetachedTask dispatchServer::onDispatch(TcpConnectionPtr conn, HttpRequest req) {
     auto connection_opt = req.getHeader("Connection");
 
     const std::string& connection = connection_opt.has_value() ? *(connection_opt.value()) : "";
     bool close = connection == "close" ||
         (req.version() == HttpRequest::Version::kHttp10 && connection != "Keep-Alive");
-
-    return close;
-}
-
-void fill_http_response(int info_code, HttpResponse& res) {
-    if(info_code < 0) {
-        res.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
-        res.setStatusMessage(http::MSG_BAD_REQUEST);
-        res.setCloseConnection(true);
-
-    } else {
-        res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
-        res.setStatusMessage(http::MSG_OK);
-        res.setCloseConnection(true);
-    }
-
-    res.setContentType(std::string(http::CONTENT_TYPE_OCTET));
-}
-
-void sendRes(const TcpConnectionPtr& conn, HttpResponse& res) {
-    std::string output;
-    res.appendToBuffer(output);
-
-    conn->send(output);
-    if (res.closeConnection()) {
-        conn->shutdown();
-    }
-}
-
-template<typename Info, typename Builder>
-void sendHttpResponse(const TcpConnectionPtr& conn, const Info& info, HttpRequest& req, Builder&& builder) {
-    bool close = req_is_close(req);
-    HttpResponse res(close);
-
-    fill_http_response(info.errcode, res);
-
-    res.setBody(builder(info));
-
-    sendRes(conn, res);
-}
-
-};
-
-DetachedTask dispatchServer::onDispatch(TcpConnectionPtr conn, HttpRequest req) {
-    bool close = req_is_close(req);
     HttpResponse res(close);
 
     std::vector<std::string> valid_urls;
@@ -154,13 +136,6 @@ DetachedTask dispatchServer::onDispatch(TcpConnectionPtr conn, HttpRequest req) 
             if(gateway_endpoints.index_map_.contains(gateway_url)) {
                 valid_urls.push_back(gateway_url);
             }
-            
-            // {
-            //     std::shared_lock<std::shared_mutex> conns_lock(this->etcd_conns_mutex_);
-            //     if(this->etcd_conns_.contains(gateway_url)) {
-            //         valid_urls.push_back(gateway_url);
-            //     }
-            // }
         }
     }
 
@@ -175,377 +150,139 @@ DetachedTask dispatchServer::onDispatch(TcpConnectionPtr conn, HttpRequest req) 
 
     res.setContentType(std::string(http::CONTENT_TYPE_JSON));
     res.setBody(res_json);
-    sendRes(conn, res);
-}
+    std::string output;
+    res.appendToBuffer(output);
 
-namespace {
-
-struct AuthLoginAwaiter {
-
-    auth::AuthServer::Stub* auth_stub_;
-    const std::string& body_;
-    LoginInfo logininfo_;
-
-    bool await_ready() const noexcept { return false; }
-    void await_suspend(std::coroutine_handle<> handle) {
-        auto loop = muduo::net::EventLoop::getEventLoopOfCurrentThread(); 
-
-        auto rootMsg = ChatApp::GetRootMessage(this->body_.data());
-        auto payload = rootMsg->payload_as_LoginHttpReqbodyPayload();
-
-        std::string_view email(payload->email()->c_str(), payload->email()->size());
-        std::string_view password(payload->password()->c_str(), payload->password()->size());
-
-        auto context = std::make_shared<grpc::ClientContext>();
-        auto request = std::make_shared<auth::LoginRequest>();
-        auto response = std::make_shared<auth::LoginResponse>();
-
-        request->set_email(email);
-        request->set_password(password);
-
-        auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
-        context->set_deadline(deadline);
-
-        this->auth_stub_->async()->Login(context.get(), request.get(), response.get(), 
-        [handle, loop, context, request, response, this] (grpc::Status s) {
-            if(s.ok()) {
-                this->logininfo_ = LoginInfo{response->code(), response->error_msg(), 
-                response->token(), response->userid(), response->username()};
-                
-                loop->runInLoop([handle] () {
-                    handle.resume();
-                });
-            }
-        });
+    conn->send(output);
+    if (res.closeConnection()) {
+        conn->shutdown();
     }
-
-    LoginInfo await_resume() { return std::move(this->logininfo_); };
-};
-
-AuthLoginAwaiter async_authLogin_coro(auth::AuthServer::Stub* stub, const std::string& body) {
-    return AuthLoginAwaiter{stub, body, {}};
 }
-
-std::string BuildLoginResfbs(const LoginInfo& info) {
-    thread_local flatbuffers::FlatBufferBuilder builder(128);
-    builder.Clear();
-
-    auto err_msg_offset = builder.CreateString(info.errmsg);
-    auto username_offset = builder.CreateString(info.username);
-    auto token_offset = builder.CreateString(info.token);
-
-    ChatApp::LoginHttpResbodyPayloadBuilder resBuilder(builder);
-    resBuilder.add_code(info.errcode);
-    resBuilder.add_err_msg(err_msg_offset);
-    resBuilder.add_userid(info.userid);
-    resBuilder.add_username(username_offset);
-    resBuilder.add_token(token_offset);
-    auto loginResOffset = resBuilder.Finish();
-
-    ChatApp::RootMessageBuilder rootMsgBuilder(builder);
-    rootMsgBuilder.add_payload_type(ChatApp::AnyPayload_LoginHttpResbodyPayload);
-    rootMsgBuilder.add_payload(loginResOffset.Union());
-    auto rootMsgOffset = rootMsgBuilder.Finish();
-
-    builder.Finish(rootMsgOffset);
-    const char* data = reinterpret_cast<const char*>(builder.GetBufferPointer());
-    int size = builder.GetSize();
-
-    return std::string(data, size);
-}
-
-};
 
 DetachedTask dispatchServer::onLogin(TcpConnectionPtr conn, HttpRequest req) {
-    std::string auth_endpoint = this->ServiceRegistryClient_.GetEndpoint(this->auth_prefix_);
-    auth::AuthServer::Stub* stub = nullptr;
+    return GenericApiHandler<auth::LoginRequest, auth::LoginResponse>(
+        conn, req, 
+        this->auth_client_pool_, this->ServiceRegistryClient_, this->auth_prefix_,
+        [] (const char* data) -> auth::LoginRequest {
+            auto rootMsg = ChatApp::GetRootMessage(data);
+            auto payload = rootMsg->payload_as_LoginHttpReqbodyPayload();
 
-    {
-        std::shared_lock<std::shared_mutex> lock(this->auth_stubs_mutex_);
-        stub = this->auth_stubs_[auth_endpoint].get();
-    }
+            std::string_view email(payload->email()->c_str(), payload->email()->size());
+            std::string_view password(payload->password()->c_str(), payload->password()->size());
 
-    if(stub == nullptr) co_return;
+            auth::LoginRequest grpc_req;
+            grpc_req.set_email(email);
+            grpc_req.set_password(password);
 
-    LoginInfo info = co_await async_authLogin_coro(stub, req.body());
+            return grpc_req;
+        },
 
-    sendHttpResponse(conn, info, req, BuildLoginResfbs);
+        [] (std::shared_ptr<auth::AuthServer::Stub> stub, grpc::ClientContext* context, 
+            auth::LoginRequest* grpc_req, auth::LoginResponse* grpc_res, auto cb) {
+            stub->async()->Login(context, grpc_req, grpc_res, std::move(cb));
+        },
+
+        [this] (const TcpConnectionPtr& conn, HttpRequest& req, auth::LoginResponse* grpc_res) {
+            fbs::LoginInfo info{grpc_res->code(), grpc_res->error_msg(), 
+            grpc_res->token(), grpc_res->userid(), grpc_res->username()};
+
+            this->sendHttpResponse(conn, info, req, fbs::httpfbsCodec::BuildLoginResfbs);
+        }
+    );
 }
-
-namespace {
-
-struct AuthRegisterAwaiter {
-
-    auth::AuthServer::Stub* auth_stub_;
-    const std::string& body_;
-    RegisterInfo info_;
-
-    bool await_ready() const noexcept { return false; }
-    void await_suspend(std::coroutine_handle<> handle) {
-
-        auto loop = muduo::net::EventLoop::getEventLoopOfCurrentThread();
-
-        auto rootMsg = ChatApp::GetRootMessage(this->body_.data());
-        auto payload = rootMsg->payload_as_RegisterHttpReqbodyPayload();
-
-        std::string_view username(payload->username()->c_str(), payload->username()->size());
-        std::string_view email(payload->email()->c_str(), payload->email()->size());
-        std::string_view password(payload->password()->c_str(), payload->password()->size());
-
-        auto context = std::make_shared<grpc::ClientContext>();
-        auto request = std::make_shared<auth::RegisterRequest>();
-        auto response = std::make_shared<auth::RegisterResponse>();
-
-        request->set_email(email);
-        request->set_username(username);
-        request->set_password(password);
-
-        this->auth_stub_->async()->Register(context.get(), request.get(), response.get(), 
-        [this, handle, loop, request, response, context] (grpc::Status s) {
-            if(s.ok()) {
-                this->info_ = RegisterInfo{response->code(), response->error_msg()};
-
-                loop->runInLoop([handle] () {
-                    handle.resume();
-                });
-            }
-        });
-
-    };
-
-    RegisterInfo await_resume() { return std::move(this->info_); }
-
-};
-
-AuthRegisterAwaiter async_authregister_coro(auth::AuthServer::Stub* stub, const std::string& body) {
-    return AuthRegisterAwaiter{stub, body, {}};
-}
-
-std::string BuildRegisterResfbs(const RegisterInfo& info) {
-    thread_local flatbuffers::FlatBufferBuilder builder(128);
-    builder.Clear();
-
-    auto err_msg_offset = builder.CreateString(info.errmsg);
-
-    ChatApp::RegisterHttpResbodyPayloadBuilder resBuilder(builder);
-    resBuilder.add_code(info.errcode);
-    resBuilder.add_err_msg(err_msg_offset);
-    auto resOffset = resBuilder.Finish();
-
-    ChatApp::RootMessageBuilder rootMsgBuilder(builder);
-    rootMsgBuilder.add_payload_type(ChatApp::AnyPayload_RegisterHttpResbodyPayload);
-    rootMsgBuilder.add_payload(resOffset.Union());
-    auto rootMsgOffset = rootMsgBuilder.Finish();
-
-    builder.Finish(rootMsgOffset);
-    const char* data = reinterpret_cast<const char*>(builder.GetBufferPointer());
-    int size = builder.GetSize();
-
-    return std::string(data, size);
-}
-
-};
 
 DetachedTask dispatchServer::onRegister(TcpConnectionPtr conn, HttpRequest req) {
-    std::string auth_endpoint = this->ServiceRegistryClient_.GetEndpoint(this->auth_prefix_);
-    auth::AuthServer::Stub* stub = nullptr;
+    return GenericApiHandler<auth::RegisterRequest, auth::RegisterResponse>(
+        conn, req, 
+        this->auth_client_pool_, this->ServiceRegistryClient_, this->auth_prefix_,
+        [] (const char* data) -> auth::RegisterRequest {
+            auto rootMsg = ChatApp::GetRootMessage(data);
+            auto payload = rootMsg->payload_as_RegisterHttpReqbodyPayload();
 
-    {
-        std::shared_lock<std::shared_mutex> lock(this->auth_stubs_mutex_);
-        stub = this->auth_stubs_[auth_endpoint].get();
-    }
+            std::string_view email(payload->email()->c_str(), payload->email()->size());
+            std::string_view username(payload->username()->c_str(), payload->username()->size());
+            std::string_view password(payload->password()->c_str(), payload->password()->size());
 
-    if(stub == nullptr) co_return;
+            auth::RegisterRequest grpc_req;
+            grpc_req.set_email(email);
+            grpc_req.set_username(username);
+            grpc_req.set_password(password);
 
-    RegisterInfo info = co_await async_authregister_coro(stub, req.body());
+            return grpc_req;
+        },
 
-    sendHttpResponse(conn, info, req, BuildRegisterResfbs);
+        [] (std::shared_ptr<auth::AuthServer::Stub> stub, grpc::ClientContext* context, 
+        auth::RegisterRequest* grpc_req, auth::RegisterResponse* grpc_res, auto cb) {
+            stub->async()->Register(context, grpc_req, grpc_res, std::move(cb));
+        },
+
+        [this] (const TcpConnectionPtr& conn, HttpRequest& req, auth::RegisterResponse* grpc_res) {
+            fbs::RegisterInfo info{grpc_res->code(), grpc_res->error_msg()};
+            this->sendHttpResponse(conn, info, req, fbs::httpfbsCodec::BuildRegisterResfbs);
+        }
+    );
 }
-
-namespace {
-
-struct LogicJoinSessionAwaiter {
-
-    logic::LogicServer::Stub* logic_stub_;
-    const std::string& body_;
-    JoinSessionInfo info_;
-
-    bool await_ready() const noexcept { return false; }
-    void await_suspend(std::coroutine_handle<> handle) {
-
-        auto rootMsg = ChatApp::GetRootMessage(this->body_.data());
-        auto payload = rootMsg->payload_as_JoinSessionHttpReqbodyPayload();
-
-        int64_t userid = payload->userid();
-        std::string_view roomname(payload->room_name()->c_str(), payload->room_name()->size());
-
-        auto context = std::make_shared<grpc::ClientContext>();
-        auto request = std::make_shared<logic::joinSessionRequest>();
-        auto response = std::make_shared<logic::joinSessionResponse>();
-
-        request->set_userid(userid);
-        request->set_roomname(roomname);
-
-        auto loop = muduo::net::EventLoop::getEventLoopOfCurrentThread();
-        
-        this->logic_stub_->async()->joinSession(context.get(), request.get(), response.get(), 
-        [this, handle, request, context, response, loop] (grpc::Status s) {
-            if(s.ok()) {
-                this->info_ = JoinSessionInfo{response->code(), response->error_msg(), 
-                    request->userid(), response->roomid()};
-
-                loop->runInLoop([handle] () {
-                    handle.resume();
-                });
-            }
-        });
-    }
-
-    JoinSessionInfo await_resume() { return std::move(this->info_); }
-
-};
-
-LogicJoinSessionAwaiter async_joinSession_coro(logic::LogicServer::Stub* stub, const std::string& body) {
-    return LogicJoinSessionAwaiter{stub, body, {}};
-}
-
-std::string BuildJoinSessionResfbs(const JoinSessionInfo& info) {
-    thread_local flatbuffers::FlatBufferBuilder builder(128);
-    builder.Clear();
-
-    auto roomid_offset = builder.CreateString(std::to_string(info.room_id));
-    auto err_msg_offset = builder.CreateString(info.errmsg);
-
-    ChatApp::JoinSessionHttpResbodyPayloadBuilder resBuilder(builder);
-    resBuilder.add_code(info.errcode);
-    resBuilder.add_err_msg(err_msg_offset);
-    resBuilder.add_userid(info.userid);
-    resBuilder.add_room_id(roomid_offset);
-    auto resOffset = resBuilder.Finish();
-
-    ChatApp::RootMessageBuilder rootMsgBuilder(builder);
-    rootMsgBuilder.add_payload_type(ChatApp::AnyPayload_JoinSessionHttpResbodyPayload);
-    rootMsgBuilder.add_payload(resOffset.Union());
-    auto rootMsgOffset = rootMsgBuilder.Finish();
-
-    builder.Finish(rootMsgOffset);
-
-    const char* data = reinterpret_cast<const char*>(builder.GetBufferPointer());
-    int size = builder.GetSize();
-
-    return std::string(data, size);
-}
-    
-};
 
 DetachedTask dispatchServer::onjoinSession(TcpConnectionPtr conn, HttpRequest req) {
-    std::string logic_endpoint = this->ServiceRegistryClient_.GetEndpoint(this->logic_prefix_);
+    return GenericApiHandler<logic::joinSessionRequest, logic::joinSessionResponse>(
+        conn, req, 
+        this->logic_client_pool_, this->ServiceRegistryClient_, this->logic_prefix_,
+        [] (const char* data) -> logic::joinSessionRequest {
+            auto rootMsg = ChatApp::GetRootMessage(data);
+            auto payload = rootMsg->payload_as_JoinSessionHttpReqbodyPayload();
 
-    logic::LogicServer::Stub* stub = nullptr;
+            int64_t userid = payload->userid();
+            std::string_view roomname(payload->room_name()->c_str(), payload->room_name()->size());
 
-    {
-        std::shared_lock<std::shared_mutex> lock(this->logic_stubs_mutex_);
-        stub = this->logic_stubs_[logic_endpoint].get();
-    }
+            logic::joinSessionRequest grpc_req;
+            grpc_req.set_userid(userid);
+            grpc_req.set_roomname(roomname);
 
-    if(stub == nullptr) co_return;
+            return grpc_req;
+        },
 
-    JoinSessionInfo info = co_await async_joinSession_coro(stub, req.body());
+        [] (std::shared_ptr<logic::LogicServer::Stub> stub, grpc::ClientContext* context, 
+        logic::joinSessionRequest* grpc_req, logic::joinSessionResponse* grpc_res, auto cb) {
+            stub->async()->joinSession(context, grpc_req, grpc_res, std::move(cb));
+        },
 
-    sendHttpResponse(conn, info, req, BuildJoinSessionResfbs);
+        [this] (const TcpConnectionPtr& conn, HttpRequest& req, logic::joinSessionResponse* grpc_res) {
+            fbs::JoinSessionInfo info{grpc_res->code(), grpc_res->error_msg(), 
+            grpc_res->userid(), grpc_res->roomid()};
+            this->sendHttpResponse(conn, info, req, fbs::httpfbsCodec::BuildJoinSessionResfbs);
+        }
+    );
 }
-
-namespace {
-
-struct LogicCreateSessionAwaiter {
-
-    logic::LogicServer::Stub* logic_stub_;
-    const std::string& body_;
-    CreateSessionInfo info_;
-
-    bool await_ready() const noexcept { return false; }
-    void await_suspend(std::coroutine_handle<> handle) {
-
-        auto rootMsg = ChatApp::GetRootMessage(this->body_.data());
-        auto payload = rootMsg->payload_as_createSessionHttpReqbodyPayload();
-
-        int64_t userid = payload->userid();
-        std::string_view roomname{payload->room_name()->c_str(), payload->room_name()->size()};
-
-        auto context = std::make_shared<grpc::ClientContext>();
-        auto request = std::make_shared<logic::createSessionRequest>();
-        auto response = std::make_shared<logic::createSessionResponse>();
-
-        request->set_userid(userid);
-        request->set_roomname(roomname);
-
-        auto loop = muduo::net::EventLoop::getEventLoopOfCurrentThread();
-
-        this->logic_stub_->async()->createSession(context.get(), request.get(), response.get(), 
-        [this, handle, loop, context, request, response] (grpc::Status s) {
-            if(s.ok()) {
-                this->info_ = CreateSessionInfo{response->code(), response->error_msg(), 
-                    request->userid(), response->roomid()};
-
-                loop->runInLoop([handle] () {
-                    handle.resume();
-                });
-            }
-        });
-    }
-
-    CreateSessionInfo await_resume() { return std::move(this->info_); }
-
-};
-
-LogicCreateSessionAwaiter async_createSession_coro(logic::LogicServer::Stub* stub, const std::string& body) {
-    return LogicCreateSessionAwaiter{stub, body, {}};
-}
-
-std::string BuildCreateSessionResfbs(const CreateSessionInfo& info) {
-    thread_local flatbuffers::FlatBufferBuilder builder(128);
-    builder.Clear();
-
-    auto roomid_offset = builder.CreateString(std::to_string(info.room_id));
-    auto err_msg_offset = builder.CreateString(info.errmsg);
-
-    ChatApp::createSessionHttpResbodyPayloadBuilder resBuilder(builder);
-    resBuilder.add_code(info.errcode);
-    resBuilder.add_err_msg(err_msg_offset);
-    resBuilder.add_userid(info.userid);
-    resBuilder.add_room_id(roomid_offset);
-    auto resOffset = resBuilder.Finish();
-
-    ChatApp::RootMessageBuilder rootMsgBuilder(builder);
-    rootMsgBuilder.add_payload_type(ChatApp::AnyPayload_createSessionHttpResbodyPayload);
-    rootMsgBuilder.add_payload(resOffset.Union());
-    auto rootMsgOffset = rootMsgBuilder.Finish();
-
-    builder.Finish(rootMsgOffset);
-
-    const char* data = reinterpret_cast<const char*>(builder.GetBufferPointer());
-    int size = builder.GetSize();
-
-    return std::string(data, size);
-}
-
-};
 
 DetachedTask dispatchServer::oncreateSession(TcpConnectionPtr conn, HttpRequest req) {
-    std::string logic_endpoint = this->ServiceRegistryClient_.GetEndpoint(this->logic_prefix_);
+    return GenericApiHandler<logic::createSessionRequest, logic::createSessionResponse>(
+        conn, req, 
+        this->logic_client_pool_, this->ServiceRegistryClient_, this->logic_prefix_,
+        [] (const char* data) -> logic::createSessionRequest {
+            auto rootMsg = ChatApp::GetRootMessage(data);
+            auto payload = rootMsg->payload_as_createSessionHttpReqbodyPayload();
 
-    logic::LogicServer::Stub* stub = nullptr;
+            int64_t userid = payload->userid();
+            std::string_view roomname{payload->room_name()->c_str(), payload->room_name()->size()};
 
-    {
-        std::shared_lock<std::shared_mutex> lock(this->logic_stubs_mutex_);
-        stub = this->logic_stubs_[logic_endpoint].get();
-    }
+            logic::createSessionRequest grpc_req;
+            grpc_req.set_userid(userid);
+            grpc_req.set_roomname(roomname);
 
-    if(stub == nullptr) co_return;
-   
-    CreateSessionInfo info = co_await async_createSession_coro(stub, req.body());
+            return grpc_req;
+        },
 
-    sendHttpResponse(conn, info, req, BuildCreateSessionResfbs);
+        [] (std::shared_ptr<logic::LogicServer::Stub> stub, grpc::ClientContext* context, 
+        logic::createSessionRequest* grpc_req, logic::createSessionResponse* grpc_res, auto cb) {
+            stub->async()->createSession(context, grpc_req, grpc_res, std::move(cb));
+        },
+
+        [this] (const TcpConnectionPtr& conn, HttpRequest& req, logic::createSessionResponse* grpc_res) {
+            fbs::CreateSessionInfo info{grpc_res->code(), grpc_res->error_msg(), 
+            grpc_res->userid(), grpc_res->roomid()};
+            this->sendHttpResponse(conn, info, req, fbs::httpfbsCodec::BuildCreateSessionResfbs);
+        }
+    );
 }
 
 void dispatchServer::start() {
@@ -555,85 +292,16 @@ void dispatchServer::start() {
     this->ServiceRegistryClient_.Subscribe(this->gateway_prefix_, 
     [] (const etcd::Event& event) {});
 
-    this->ServiceRegistryClient_.Subscribe(this->auth_prefix_, 
-    [this] (const etcd::Event& event) {
-        this->onWatcher(event, this->auth_prefix_, 
-        this->auth_stubs_, this->auth_stubs_mutex_, [] (auto channel) {
-            return  auth::AuthServer::NewStub(channel);
-        });
-    });
-
-    this->ServiceRegistryClient_.Subscribe(this->logic_prefix_, 
-    [this] (const etcd::Event& event) {
-        this->onWatcher(event, this->logic_prefix_, 
-        this->logic_stubs_, this->logic_stubs_mutex_, [] (auto channel) {
-            return logic::LogicServer::NewStub(channel);
-        });
-    });
-
-    std::vector<std::string> auths = this->ServiceRegistryClient_.GetAllEndpoints(this->auth_prefix_).endpoints_;
-    for(const std::string& auth : auths) {
-        this->addStub(this->auth_stubs_, this->auth_stubs_mutex_, auth, [] (auto channel) {
-            return auth::AuthServer::NewStub(channel);
-        });
-    }
-
-    std::vector<std::string> logics = this->ServiceRegistryClient_.GetAllEndpoints(this->logic_prefix_).endpoints_;
-    for(const std::string& logic : logics) {
-        this->addStub(this->logic_stubs_, this->logic_stubs_mutex_, logic, [] (auto channel) {
-            return logic::LogicServer::NewStub(channel);
-        });
-    }
-
-    // auto response = this->etcd_client_->ls(this->watch_prefix_).get();
-
-    // for(int i = 0; i < response.keys().size(); ++i) {
-    //     const std::string& ip_port = response.value(i).as_string();
-
-    //     {
-    //         std::unique_lock<std::shared_mutex> lock(this->etcd_conns_mutex_);
-    //         auto it = this->etcd_conns_.find(ip_port);
-    //         if(it == this->etcd_conns_.end()) this->etcd_conns_.insert(ip_port);
-    //     }
-    // }
-
-    // this->etcd_watcher_ = std::make_unique<etcd::Watcher>(
-    //     this->etcd_url_,
-    //     this->watch_prefix_,
-    //     [this] (const etcd::Response& response) {
-    //         this->onetcdWatcher(response);
-    //     },
-    //     true
-    // );
+    this->auth_client_pool_.Init(this->ServiceRegistryClient_, this->auth_prefix_);
+    this->logic_client_pool_.Init(this->ServiceRegistryClient_, this->logic_prefix_);
 
     this->sync_worker_ = std::thread([this] () {
         this->BackendSyncTask();
     });
 
-    this->server_->GetAsync(http::DISPATCH_API_PATH, 
-    [this] (const TcpConnectionPtr& conn, const HttpRequest& req) {
-        return this->onDispatch(conn, std::move(req));
-    });
-
-    this->server_->GetAsync(http::LOGIN_API_PATH, 
-    [this] (const TcpConnectionPtr& conn, const HttpRequest& req) {
-        return this->onLogin(conn, std::move(req));
-    });
-
-    this->server_->GetAsync(http::REGISTER_API_PATH, 
-    [this] (const TcpConnectionPtr& conn, const HttpRequest& req) {
-        return this->onRegister(conn, req);
-    });
-
-    this->server_->GetAsync(http::JOINSESSION_API_PATH, 
-    [this] (const TcpConnectionPtr& conn, const HttpRequest& req) {
-        return this->onjoinSession(conn, req);
-    });
-
-    this->server_->GetAsync(http::CREATESESSION_API_PATH, 
-    [this] (const TcpConnectionPtr& conn, const HttpRequest& req) {
-        return this->oncreateSession(conn, req);
-    });
+    for(auto& [path, handle] : this->HttpApiRoutes_) {
+        this->server_->GetAsync(path, std::move(handle));
+    }
 
     this->server_->start();
 }

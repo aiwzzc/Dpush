@@ -470,6 +470,7 @@ DetachedTask LogicGrpcServer::DojoinSession(grpc::ServerUnaryReactor* reactor, c
     if(rows.empty()) {
         response->set_code(-1);
         response->set_error_msg("Session not exist");
+        response->set_userid(userid);
         response->set_roomid(-1);
 
         reactor->Finish(grpc::Status::OK);
@@ -493,6 +494,7 @@ DetachedTask LogicGrpcServer::DojoinSession(grpc::ServerUnaryReactor* reactor, c
 
     response->set_code(0);
     response->set_error_msg("");
+    response->set_userid(userid);
     response->set_roomid(room_id);
 
     reactor->Finish(grpc::Status::OK);
@@ -618,6 +620,7 @@ DetachedTask LogicGrpcServer::DocreateSession(grpc::ServerUnaryReactor* reactor,
 
     response->set_code(0);
     response->set_error_msg("");
+    response->set_userid(userid);
     response->set_roomid(new_room_id);
     reactor->Finish(grpc::Status::OK);
 }

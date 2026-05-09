@@ -44,8 +44,13 @@ std::shared_mutex GatewayServer::user_Eventloop_mutex_{};
 std::atomic<long> GatewayServer::conned_count_{0};
 
 GatewayServer::GatewayServer() : 
-grpcClient_(std::make_unique<grpcClient>()), GatewayPubSubManager_(std::make_unique<GatewayPubSubManager>()), 
+ServiceRegistryClient_(etcd_url_),
+grpcClient_(std::make_unique<grpcClient>(&ServiceRegistryClient_)), 
+GatewayPubSubManager_(std::make_unique<GatewayPubSubManager>()), 
 kafkaProducer_(std::make_unique<kafkaProducer>()) {
+
+    this->ServiceRegistryClient_.RegisterSelf("/services/gateway/", Config::getInstance().addr_);
+    this->grpcClient_->start();
 
     WsServerContext ctx{this->grpcClient_.get(), this->kafkaProducer_.get()};
 
@@ -70,8 +75,6 @@ kafkaProducer_(std::make_unique<kafkaProducer>()) {
     builder.RegisterService(this->grpcServer_.get());
 
     this->load_queue_ = std::make_unique<moodycamel::ConcurrentQueue<GatewayLoad>>();
-
-    this->register_ = std::make_unique<GatewayRegister>("127.0.0.1:2379", Config::getInstance().addr_);
 
     sw::redis::ConnectionOptions connection_options;
     connection_options.host = "127.0.0.1";
@@ -112,8 +115,6 @@ GatewayPubSubManager_(std::make_unique<GatewayPubSubManager>()), kafkaProducer_(
     grpc::ServerBuilder builder;
     builder.AddListeningPort("0.0.0.0:5005", grpc::InsecureServerCredentials());
     builder.RegisterService(this->grpcServer_.get());
-
-    this->register_ = std::make_unique<GatewayRegister>("127.0.0.1:2379", Config::getInstance().addr_);
 }
 #endif
 
@@ -123,7 +124,6 @@ GatewayServer::~GatewayServer() {
     this->running_ = false;
     if(this->poolthread_.joinable()) this->poolthread_.join();
     if(this->redis_worker_.joinable()) this->redis_worker_.join();
-    this->register_->stop();
 }
 
 static uint64_t getCurrentTimestamp() {
@@ -174,6 +174,5 @@ void GatewayServer::start() {
         this->collect_load_to_spsc();
     });
 
-    this->register_->start();
     this->wsServer_->start();
 }

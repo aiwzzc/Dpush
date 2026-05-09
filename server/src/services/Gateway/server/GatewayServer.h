@@ -14,9 +14,10 @@
 #include "GatewayPubSubManager.h"
 #include "producer.h"
 #include "grpcServer.h"
-#include "GatewayRegister.h"
 #include "concurrentqueue/concurrentqueue.h"
 #include "utils/types.h"
+
+#include "etcdServiceNode/ServiceRegistry.h"
 
 namespace muduo {
 namespace net {
@@ -43,6 +44,9 @@ private:
     void collect_load_to_spsc();
     void write_load_to_redis(GatewayLoad& load);
 
+    std::string etcd_url_{"127.0.0.1:2379"};
+    pulse::net::ServiceRegistryClient ServiceRegistryClient_;
+
     std::unique_ptr<wsServer> wsServer_;
     std::unique_ptr<grpcClient> grpcClient_;
     std::unique_ptr<GatewayPubSubManager> GatewayPubSubManager_;
@@ -55,5 +59,4 @@ private:
     std::unique_ptr<moodycamel::ConcurrentQueue<GatewayLoad>> load_queue_;
 
     std::unique_ptr<GatewayGrpcServer> grpcServer_;
-    std::unique_ptr<GatewayRegister> register_;
 };

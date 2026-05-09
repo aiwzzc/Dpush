@@ -38,22 +38,21 @@ void ServiceRegistryClient::Subscribe(const std::string& target_prefix, const Wa
     }
 }
 
-NodePool ServiceRegistryClient::GetAllEndpoints(const std::string& target_prefix) {
+NodePoolRes ServiceRegistryClient::GetAllEndpoints(const std::string& target_prefix) {
     std::shared_lock<std::shared_mutex> lock(this->cache_mutex_);
     auto it = this->endpoints_cache_.find(target_prefix);
     if(it == this->endpoints_cache_.end()) return {};
 
-    return it->second;
+    return NodePoolRes{it->second.endpoints_, it->second.index_map_};
 }
 
 std::string ServiceRegistryClient::GetEndpoint(const std::string& target_prefix) {
     std::shared_lock<std::shared_mutex> lock(this->cache_mutex_);
     auto it = this->endpoints_cache_.find(target_prefix);
-    if(it == this->endpoints_cache_.end()) return {};
+    if(it == this->endpoints_cache_.end() || it->second.endpoints_.empty()) return {};
 
-    std::size_t& index = this->round_robin_idx_[target_prefix];
+    std::size_t index = it->second.index_.fetch_add(1, std::memory_order_relaxed);
     std::string endpoint = it->second.endpoints_[index % it->second.endpoints_.size()];
-    ++index;
 
     return endpoint;
 }

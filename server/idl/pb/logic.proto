@@ -35,9 +35,10 @@ message joinSessionRequest {
 }
 
 message joinSessionResponse {
-    int64 roomid = 1;
-    int32 code = 2;
-    string error_msg = 3;
+    int32 userid = 1;
+    int64 roomid = 2;
+    int32 code = 3;
+    string error_msg = 4;
 }
 
 message createSessionRequest {
@@ -46,9 +47,10 @@ message createSessionRequest {
 }
 
 message createSessionResponse {
-    int64 roomid = 1;
-    int32 code = 2;
-    string error_msg = 3;
+    int32 userid = 1;
+    int64 roomid = 2;
+    int32 code = 3;
+    string error_msg = 4;
 }
 
 message PullMessageRequest {

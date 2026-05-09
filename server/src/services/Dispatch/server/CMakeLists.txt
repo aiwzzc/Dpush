@@ -8,6 +8,7 @@ PRIVATE
     ${CMAKE_BINARY_DIR}/fbs 
     ${CMAKE_SOURCE_DIR}/src/net
     ${CMAKE_SOURCE_DIR}/src/base
+    ${CMAKE_SOURCE_DIR}/src/protocol
     ${CMAKE_SOURCE_DIR}/third_party
 )
 
@@ -22,4 +23,5 @@ PUBLIC
     push_http
     push_constants
     push_etcdnode
+    push_fbs_proto
 )

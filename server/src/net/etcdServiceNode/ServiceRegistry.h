@@ -12,11 +12,18 @@
 #include <memory>
 #include <functional>
 #include <unordered_set>
+#include <atomic>
 
 namespace pulse::net {
 
 // swap + pop_back 
 struct NodePool {
+    std::vector<std::string> endpoints_;
+    std::unordered_map<std::string, std::size_t> index_map_;
+    std::atomic<std::size_t> index_{0};
+};
+
+struct NodePoolRes {
     std::vector<std::string> endpoints_;
     std::unordered_map<std::string, std::size_t> index_map_;
 };
@@ -30,7 +37,7 @@ public:
 
     void RegisterSelf(const std::string& service_prefix, const std::string& service_url, int ttl = 30);
     void Subscribe(const std::string& target_prefix, const WatcherCallback& cb);
-    NodePool GetAllEndpoints(const std::string& target_prefix);
+    NodePoolRes GetAllEndpoints(const std::string& target_prefix);
     std::string GetEndpoint(const std::string& target_prefix);
 
 private:
@@ -47,7 +54,6 @@ private:
 
     std::shared_mutex cache_mutex_;
     std::unordered_map<std::string, NodePool> endpoints_cache_;
-    std::unordered_map<std::string, std::size_t> round_robin_idx_;
 
     std::unordered_map<std::string, std::unique_ptr<etcd::Watcher>> watchers_;
 };

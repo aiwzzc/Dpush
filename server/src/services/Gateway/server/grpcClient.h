@@ -5,6 +5,8 @@
 #include "room.grpc.pb.h"
 #include "room.pb.h"
 
+#include "etcdServiceNode/grpcClientPool.hpp"
+
 #include <memory>
 #include <grpcpp/grpcpp.h>
 #include <vector>
@@ -20,12 +22,11 @@ class grpcClient {
 
 public:
 
-    grpcClient() : 
-    Logicchannel(grpc::CreateChannel("127.0.0.1:5008", grpc::InsecureChannelCredentials())), 
-    Logicstub(logic::LogicServer::NewStub(this->Logicchannel)),
-    Roomchannel(grpc::CreateChannel("127.0.0.1:5007", grpc::InsecureChannelCredentials())),
-    RoomStub(room::RoomServer::NewStub(this->Roomchannel)) {}
+    grpcClient(pulse::net::ServiceRegistryClient* ServiceRegistryClient) : 
+    ServiceRegistryClient_(ServiceRegistryClient) {}
     ~grpcClient() = default;
+
+    void start();
 
     void rpcCilentMessageAsync(const std::string& message, int32_t userid, std::string username, 
     std::function<void(std::string)> callback);
@@ -37,10 +38,12 @@ public:
     void rpcPullMessageAsync(int64_t roomid, std::string& roomname, const std::function<void(const std::string&)>& callback);
 
 private:
-    std::shared_ptr<grpc::Channel> Logicchannel;
-    std::shared_ptr<grpc::Channel> Roomchannel;
-    std::unique_ptr<logic::LogicServer::Stub> Logicstub;
-    std::unique_ptr<room::RoomServer::Stub> RoomStub;
+    std::string logic_prefix_{"/services/logic/"};
+    std::string room_prefix_{"/services/room/"};
+
+    pulse::net::ServiceRegistryClient* ServiceRegistryClient_;
+    pulse::net::RpcClientPool<logic::LogicServer> logic_stubs_;
+    pulse::net::RpcClientPool<room::RoomServer> room_stubs_;
 };
 
 using grpcClientPtr = std::shared_ptr<grpcClient>;

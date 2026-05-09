@@ -19,6 +19,7 @@ target_include_directories(GatewayServer PUBLIC
 ${CMAKE_BINARY_DIR}/proto 
 ${CMAKE_BINARY_DIR}/fbs
 ${CMAKE_SOURCE_DIR}/src/base
+${CMAKE_SOURCE_DIR}/src/net
 ${CMAKE_SOURCE_DIR}/third_party
 )
 
@@ -57,6 +58,7 @@ PRIVATE
     proto_gen  
     push_utils
     push_constants
+    push_etcdnode
     ryml 
     ${JEMALLOC_LIBRARIES}
 )

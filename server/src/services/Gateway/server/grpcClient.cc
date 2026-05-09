@@ -15,15 +15,23 @@ void grpcClient::rpcCilentMessageAsync(const std::string& message, int32_t useri
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
     context->set_deadline(deadline);
 
-    this->Logicstub->async()->clientMessage(context.get(), request.get(), response.get(), 
-        [request, response, context, callback] (grpc::Status s) {
-            if(s.ok() && !response->message().empty()) {
-                callback(response->message());
+    auto stub = this->logic_stubs_.GetStub(*this->ServiceRegistryClient_, this->logic_prefix_);
+    if(stub == nullptr) return;
 
-            } else {
-                callback({});
-            }
-        });
+    stub->async()->clientMessage(context.get(), request.get(), response.get(), 
+    [request, response, context, callback] (grpc::Status s) {
+        if(s.ok() && !response->message().empty()) {
+            callback(response->message());
+
+        } else {
+            callback({});
+        }
+    });
+}
+
+void grpcClient::start() {
+    this->logic_stubs_.Init(*this->ServiceRegistryClient_, this->logic_prefix_);
+    this->room_stubs_.Init(*this->ServiceRegistryClient_, this->room_prefix_);
 }
 
 void grpcClient::rpcclearCursorsAsync(int32_t userid, std::function<void()> callback) {
@@ -37,7 +45,10 @@ void grpcClient::rpcclearCursorsAsync(int32_t userid, std::function<void()> call
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
     context->set_deadline(deadline);
 
-    this->Logicstub->async()->clearCursors(context.get(), request.get(), response.get(), 
+    auto stub = this->logic_stubs_.GetStub(*this->ServiceRegistryClient_, this->logic_prefix_);
+    if(stub == nullptr) return;
+
+    stub->async()->clearCursors(context.get(), request.get(), response.get(), 
     [context, request, response, callback] (grpc::Status s) {
         if(s.ok()) callback();
     });
@@ -56,7 +67,10 @@ void grpcClient::rpcGetUserRoomListAsync(int32_t userid, const std::string& addr
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
     context->set_deadline(deadline);
 
-    this->RoomStub->async()->GetUserRoomList(context.get(), request.get(), response.get(), 
+    auto stub = this->room_stubs_.GetStub(*this->ServiceRegistryClient_, this->room_prefix_);
+    if(stub == nullptr) return;
+
+    stub->async()->GetUserRoomList(context.get(), request.get(), response.get(), 
     [request, response, context, callback = std::move(callback)] (grpc::Status s) {
         if(s.ok()) {
             std::vector<std::string> roomlist;
@@ -76,7 +90,10 @@ void grpcClient::rpcJoinRooms(int32_t userid, std::vector<std::string>& rooms) {
     ClientContext ctx;
     room::JoinRoomResponse response;
 
-    auto writer = this->RoomStub->JoinRooms(&ctx, &response);
+    auto stub = this->room_stubs_.GetStub(*this->ServiceRegistryClient_, this->room_prefix_);
+    if(stub == nullptr) return;
+
+    auto writer = stub->JoinRooms(&ctx, &response);
 
     for(auto& room : rooms) {
         room::JoinRoomRequest req;
@@ -126,7 +143,10 @@ void BathPullClientReactor::OnDone(const ::grpc::Status& status) {
 
 void grpcClient::rpcBathPullMessageAsync(const std::string& message, std::function<void(const std::string&)> callback) {
 
-    new BathPullClientReactor(this->Logicstub.get(), message, std::move(callback), 
+    auto stub = this->logic_stubs_.GetStub(*this->ServiceRegistryClient_, this->logic_prefix_);
+    if(stub == nullptr) return;
+
+    new BathPullClientReactor(stub.get(), message, std::move(callback), 
     [] (const ::grpc::Status& status) {
         if(status.ok()) {
 
@@ -142,7 +162,10 @@ void grpcClient::rpcIsSubSessionAsync(int32_t userid, std::string& room_id, cons
     request->set_userid(userid);
     request->set_room_id(room_id);
 
-    this->RoomStub->async()->IsSubRoom(ctx.get(), request.get(), response.get(), 
+    auto stub = this->room_stubs_.GetStub(*this->ServiceRegistryClient_, this->room_prefix_);
+    if(stub == nullptr) return;
+
+    stub->async()->IsSubRoom(ctx.get(), request.get(), response.get(), 
     [ctx, request, response, callback = std::move(callback)] (grpc::Status s) {
         if(s.ok()) {
             callback(response->message());
@@ -159,7 +182,10 @@ void grpcClient::rpcPullMessageAsync(int64_t roomid, std::string& roomname, cons
     request->set_roomname(roomname);
     request->set_messageid(-1);
 
-    this->Logicstub->async()->pullMessage(ctx.get(), request.get(), response.get(),
+    auto stub = this->logic_stubs_.GetStub(*this->ServiceRegistryClient_, this->logic_prefix_);
+    if(stub == nullptr) return;
+
+    stub->async()->pullMessage(ctx.get(), request.get(), response.get(),
     [ctx, request, response, callback = std::move(callback)] (grpc::Status s) {
         callback(response->message());
     });

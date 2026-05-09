@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <algorithm>
 #include <mutex>
@@ -15,6 +16,11 @@
 #include <sw/redis++/redis++.h>
 
 #include "http/HttpServer.h"
+#include "http/HttpRequest.h"
+#include "http/HttpResponse.h"
+
+#include "constants/http_constants.h"
+
 #include "auth.grpc.pb.h"
 #include "auth.pb.h"
 #include "logic.grpc.pb.h"
@@ -22,42 +28,13 @@
 
 #include <grpcpp/grpcpp.h>
 
+#include "GrpcAwaiter.hpp"
 #include "concurrency/coroutineTask.h"
-#include "etcdServiceNode/ServiceRegistry.h"
-
-class HttpRequest;
-class HttpResponse;
+#include "etcdServiceNode/grpcClientPool.hpp"
 
 struct GatewayInfo {
     int score;
     std::string gateway_url;
-};
-
-struct LoginInfo {
-    int errcode{-1};
-    std::string errmsg;
-    std::string token;
-    int32_t userid{0};
-    std::string username;
-};
-
-struct RegisterInfo {
-    int errcode{-1};
-    std::string errmsg;
-};
-
-struct CreateSessionInfo {
-    int errcode{-1};
-    std::string errmsg;
-    int32_t userid{0};
-    int64_t room_id;
-};
-
-struct JoinSessionInfo {
-    int errcode{-1};
-    std::string errmsg;
-    int32_t userid{0};
-    int64_t room_id;
 };
 
 class dispatchServer {
@@ -86,44 +63,75 @@ private:
     DetachedTask oncreateSession(TcpConnectionPtr conn, HttpRequest req);
 
 private:
+    template<typename Info, typename Builder>
+    void sendHttpResponse(
+        const TcpConnectionPtr& conn, 
+        const Info& info, 
+        HttpRequest& req, 
+        Builder&& builder) {
 
-    template<typename StubMap, typename StubFactory>
-    void addStub(StubMap& stubmap, std::shared_mutex& mutex, 
-        const std::string& endpoint, StubFactory&& factory) {
+        auto connection_opt = req.getHeader("Connection");
 
-        std::unique_lock<std::shared_mutex> lock(mutex);
+        const std::string& connection = connection_opt.has_value() ? *(connection_opt.value()) : "";
+        bool close = connection == "close" ||
+            (req.version() == HttpRequest::Version::kHttp10 && connection != "Keep-Alive");
 
-        if(stubmap.contains(endpoint)) return;
+        HttpResponse res(close);
 
-        auto channel = grpc::CreateChannel(endpoint, grpc::InsecureChannelCredentials());
-        stubmap[endpoint] = factory(channel);
-    }
+        if(info.errcode < 0) {
+            res.setStatusCode(HttpResponse::HttpStatusCode::k400BadRequest);
+            res.setStatusMessage(pulse::constants::http::MSG_BAD_REQUEST);
 
-    template<typename StubMap>
-    void removeStub(StubMap& stubmap, std::shared_mutex& mutex, const std::string& endpoint) {
-        std::unique_lock<std::shared_mutex> lock(mutex);
-        stubmap.erase(endpoint);
-    }
-
-    template<typename StubMap, typename StubFactory>
-    void onWatcher(const etcd::Event& event, const std::string& service_prefix, 
-        StubMap& stubmap, std::shared_mutex& mutex, StubFactory&& factory) {
-
-        std::string key = event.kv().key();
-        std::string endpoint = key.substr(service_prefix.length());
-
-        auto type = event.event_type();
-
-        if(type == etcd::Event::EventType::DELETE_) {
-            removeStub(stubmap, mutex, endpoint);
-
-            return;
+        } else {
+            res.setStatusCode(HttpResponse::HttpStatusCode::k200Ok);
+            res.setStatusMessage(pulse::constants::http::MSG_OK);
         }
 
-        if(type == etcd::Event::EventType::PUT) {
-            addStub(stubmap, mutex, endpoint, factory);
+        res.setCloseConnection(true);
+        res.setContentType(std::string(pulse::constants::http::CONTENT_TYPE_OCTET));
+
+        res.setBody(builder(info));
+
+        std::string output;
+        res.appendToBuffer(output);
+
+        conn->send(output);
+        if (res.closeConnection()) {
+            conn->shutdown();
         }
     }
+
+    template<typename GrpcReq, typename GrpcRes, typename StubPool,
+    typename HttpReqParser, typename GprcInvoker, typename HttpResHandler>
+    DetachedTask GenericApiHandler(
+        TcpConnectionPtr conn, 
+        HttpRequest req, StubPool& stubPool, 
+        pulse::net::ServiceRegistryClient& ServiceRegistryClient, 
+        const std::string& prefix,
+        HttpReqParser req_parser, 
+        GprcInvoker grpc_invoker, 
+        HttpResHandler res_handler) {
+
+        GrpcReq grpc_req = req_parser(req.body().data());
+
+        auto stub = stubPool.GetStub(ServiceRegistryClient, prefix);
+        if(stub == nullptr) co_return;
+
+        auto [status, grpc_res] = co_await MakeGrpcAwaiter<GrpcRes>(
+            [&grpc_invoker, stub, &grpc_req] (grpc::ClientContext* context, GrpcRes* response, auto cb) {
+                grpc_invoker(stub, context, &grpc_req, response, std::move(cb));
+            }
+        );
+
+        if(!status.ok()) co_return;
+
+        res_handler(conn, req, grpc_res.get());
+    }
+
+private:
+
+    using HttpHandler = std::function<DetachedTask(const TcpConnectionPtr&, const HttpRequest&)>;
+    std::vector<std::pair<std::string_view, HttpHandler>> HttpApiRoutes_;
 
 private:
     using AuthStub = std::unique_ptr<auth::AuthServer::Stub>;
@@ -134,26 +142,12 @@ private:
     std::string auth_prefix_{"/services/auth/"};
     std::string logic_prefix_{"/services/logic/"};
 
-    // std::shared_ptr<etcd::Client> etcd_client_;
-    // std::unique_ptr<etcd::Watcher> etcd_watcher_;
     std::unique_ptr<HttpServer> server_;
 
-    // std::shared_ptr<grpc::Channel> Authchannel;
-    // std::unique_ptr<auth::AuthServer::Stub> Authstub;
-
-    // std::shared_ptr<grpc::Channel> Logicchannel;
-    // std::unique_ptr<logic::LogicServer::Stub> Logicstub;
-
-    // std::unordered_set<std::string> etcd_conns_;
-    // std::shared_mutex etcd_conns_mutex_;
-
-    std::shared_mutex auth_stubs_mutex_;
-    std::unordered_map<std::string, AuthStub> auth_stubs_;
-
-    std::shared_mutex logic_stubs_mutex_;
-    std::unordered_map<std::string, LogicStub> logic_stubs_;
-
     pulse::net::ServiceRegistryClient ServiceRegistryClient_;
+
+    pulse::net::RpcClientPool<auth::AuthServer> auth_client_pool_;
+    pulse::net::RpcClientPool<logic::LogicServer> logic_client_pool_;
 
     std::vector<GatewayInfo> cached_gateways_;
     std::shared_mutex cache_mutex_;

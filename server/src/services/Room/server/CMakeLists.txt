@@ -14,6 +14,7 @@ target_include_directories(RoomServer PUBLIC
 ${CMAKE_BINARY_DIR}/fbs 
 ${CMAKE_BINARY_DIR}/proto
 ${CMAKE_SOURCE_DIR}/src/base
+${CMAKE_SOURCE_DIR}/src/net
 )
 
 set(GRPC_LIBS
@@ -27,7 +28,7 @@ set(GRPC_LIBS
 
 target_link_libraries(RoomServer 
 PRIVATE
-    ${GRPC_LIBS} 
+    # ${GRPC_LIBS} 
     OpenSSL::SSL
     OpenSSL::Crypto
     ZLIB::ZLIB
@@ -37,6 +38,10 @@ PRIVATE
     hiredis 
     push_crypto
     push_utils
-    push_constants 
+
+    push_constants
+    etcd-cpp-api
+    cpprest
+    push_etcdnode
     proto_gen
 )

@@ -9,7 +9,12 @@
 
 using namespace pulse::constants;
 
-RoomServer::RoomServer(sw::redis::Redis* redis) : redis_pool_(redis) {}
+RoomServer::RoomServer(sw::redis::Redis* redis) : 
+ServiceRegistryClient_(etcd_url_), 
+redis_pool_(redis) {
+
+    this->ServiceRegistryClient_.RegisterSelf("/services/room/", "192.168.183.130:5007");
+}
 RoomServer::~RoomServer() = default;
 
 Status RoomServer::GetUserRoomList(::grpc::ServerContext* context, const ::room::GetUserRoomListRequest* request, 

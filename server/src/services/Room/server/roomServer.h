@@ -6,6 +6,8 @@
 #include <grpcpp/grpcpp.h>
 #include <sw/redis++/redis++.h>
 
+#include "etcdServiceNode/ServiceRegistry.h"
+
 using grpc::Server;
 using grpc::ServerBuilder;
 using grpc::ServerContext;
@@ -33,5 +35,7 @@ public:
         ::room::IsSubRoomResponse* response) override;
 
 private:
+    std::string etcd_url_{"127.0.0.1:2379"};
+    pulse::net::ServiceRegistryClient ServiceRegistryClient_;
     sw::redis::Redis* redis_pool_;
 };
