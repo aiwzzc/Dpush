@@ -7,19 +7,13 @@
 #include <string>
 #include <vector>
 
+#include "GatewayConfig.h"
+
 namespace muduo {
 namespace net {
     class InetAddress;
     class Buffer;
 };
-};
-
-class grpcClient;
-class kafkaProducer;
-
-struct WsServerContext {
-    grpcClient* grpcClient_;
-    kafkaProducer* producer_;
 };
 
 using muduo::net::TcpConnectionPtr;
@@ -30,7 +24,10 @@ public:
     using ThreadInitCallback = std::function<void(muduo::net::EventLoop*)>;
     using MainLoopTimerCallback = std::function<void()>;
 
-    wsServer(const muduo::net::InetAddress &addr, const std::string& name, int num_event_loops, const WsServerContext& ctx);
+    wsServer(
+        const muduo::net::InetAddress &addr, 
+        const std::string& name, int num_event_loops, 
+        const pulse::config::WsServerContext& ctx);
     ~wsServer();
 
     void start();
@@ -49,7 +46,7 @@ private:
     std::unique_ptr<muduo::net::EventLoop> loop_;
     std::unique_ptr<muduo::net::TcpServer> tcpServer_;
 
-    WsServerContext wsContext_;
+    pulse::config::WsServerContext wsContext_;
 
     MainLoopTimerCallback mainLoopTimerCallback_;
 };

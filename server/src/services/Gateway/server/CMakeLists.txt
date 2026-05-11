@@ -59,6 +59,8 @@ PRIVATE
     push_utils
     push_constants
     push_etcdnode
+    push_config
+    push_config_builder
     ryml 
     ${JEMALLOC_LIBRARIES}
 )

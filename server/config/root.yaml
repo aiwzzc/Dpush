@@ -1,0 +1,55 @@
+env: dev
+
+etcd:
+  endpoints:
+    - 127.0.0.1:2379
+
+  timeout_ms: 3000
+
+redis:
+  endpoints:
+    - host: 127.0.0.1
+      port: 6379
+
+  db: 1
+  pool_size: 6
+  timeout_ms: 2000
+
+mysql:
+  endpoints:
+    - host: 127.0.0.1
+      port: 3306
+
+  username: root
+  password: zzc1109aiw
+  database: chatroom
+
+  pool_thread_count: 4
+  pool_size: 10
+  timeout_ms: 5000
+
+kafka:
+  endpoints:
+    - 127.0.0.1:9092
+
+  producer:
+    acks: all
+    enable_idempotence: true
+
+  consumer:
+    group_id: chat_room_consumer_group_1
+    auto_offset_reset: earliest
+    enable_auto_commit: true
+    enable_auto_offset_store: false
+
+service_registry:
+  dispatch_service_prefix: /services/dispatch/
+  gateway_service_prefix: /services/gateway/
+  auth_service_prefix: /services/auth/
+  room_service_prefix: /services/room/
+  logic_service_prefix: /services/logic/
+
+  lease_ttl: 10
+
+log:
+  level: error

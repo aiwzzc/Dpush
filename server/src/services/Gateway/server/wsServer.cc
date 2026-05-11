@@ -11,7 +11,6 @@
 
 #include "grpcClient.h"
 #include "producer.h"
-#include "config.h"
 
 #include "constants/ws_constants.h"
 #include "constants/protocol_fields.h"
@@ -27,8 +26,12 @@ using TcpServer = muduo::net::TcpServer;
 using TcpConnectionPtr = muduo::net::TcpConnectionPtr;
 using Buffer = muduo::net::Buffer;
 
-wsServer::wsServer(const muduo::net::InetAddress &addr, const std::string& name, 
-    int num_event_loops, const WsServerContext& ctx): loop_(std::make_unique<EventLoop>()), 
+wsServer::wsServer(
+    const muduo::net::InetAddress &addr, 
+    const std::string& name, 
+    int num_event_loops, 
+    const pulse::config::WsServerContext& ctx): 
+    loop_(std::make_unique<EventLoop>()), 
     tcpServer_(std::make_unique<TcpServer>(this->loop_.get(), addr, name, TcpServer::kReusePort)), 
     wsContext_(std::move(ctx)) {
 
@@ -81,7 +84,7 @@ void wsServer::onUpgrade(const TcpConnectionPtr& conn) {
 
     this->wsContext_.grpcClient_->rpcclearCursorsAsync(session->userid(), [] () { return; });
 
-    this->wsContext_.grpcClient_->rpcGetUserRoomListAsync(session->userid(), Config::getInstance().addr_, 
+    this->wsContext_.grpcClient_->rpcGetUserRoomListAsync(session->userid(), this->wsContext_.endpoint_, 
     [session] (std::vector<std::string>& roomlist) {
 
         if(roomlist.empty()) return;

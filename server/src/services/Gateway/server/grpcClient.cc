@@ -15,7 +15,10 @@ void grpcClient::rpcCilentMessageAsync(const std::string& message, int32_t useri
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
     context->set_deadline(deadline);
 
-    auto stub = this->logic_stubs_.GetStub(*this->ServiceRegistryClient_, this->logic_prefix_);
+    auto stub = this->logic_stubs_.GetStubFromPrefix(
+        *this->ServiceRegistryClient_, 
+        this->config_.serviceRegistry.logic_prefix_
+    );
     if(stub == nullptr) return;
 
     stub->async()->clientMessage(context.get(), request.get(), response.get(), 
@@ -29,9 +32,9 @@ void grpcClient::rpcCilentMessageAsync(const std::string& message, int32_t useri
     });
 }
 
-void grpcClient::start() {
-    this->logic_stubs_.Init(*this->ServiceRegistryClient_, this->logic_prefix_);
-    this->room_stubs_.Init(*this->ServiceRegistryClient_, this->room_prefix_);
+void grpcClient::Init() {
+    this->logic_stubs_.Init(*this->ServiceRegistryClient_, this->config_.serviceRegistry.logic_prefix_);
+    this->room_stubs_.Init(*this->ServiceRegistryClient_, this->config_.serviceRegistry.room_prefix_);
 }
 
 void grpcClient::rpcclearCursorsAsync(int32_t userid, std::function<void()> callback) {
@@ -45,7 +48,10 @@ void grpcClient::rpcclearCursorsAsync(int32_t userid, std::function<void()> call
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
     context->set_deadline(deadline);
 
-    auto stub = this->logic_stubs_.GetStub(*this->ServiceRegistryClient_, this->logic_prefix_);
+    auto stub = this->logic_stubs_.GetStubFromPrefix(
+        *this->ServiceRegistryClient_, 
+        this->config_.serviceRegistry.logic_prefix_
+    );
     if(stub == nullptr) return;
 
     stub->async()->clearCursors(context.get(), request.get(), response.get(), 
@@ -67,7 +73,10 @@ void grpcClient::rpcGetUserRoomListAsync(int32_t userid, const std::string& addr
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(5);
     context->set_deadline(deadline);
 
-    auto stub = this->room_stubs_.GetStub(*this->ServiceRegistryClient_, this->room_prefix_);
+    auto stub = this->room_stubs_.GetStubFromPrefix(
+        *this->ServiceRegistryClient_, 
+        this->config_.serviceRegistry.room_prefix_
+    );
     if(stub == nullptr) return;
 
     stub->async()->GetUserRoomList(context.get(), request.get(), response.get(), 
@@ -90,7 +99,10 @@ void grpcClient::rpcJoinRooms(int32_t userid, std::vector<std::string>& rooms) {
     ClientContext ctx;
     room::JoinRoomResponse response;
 
-    auto stub = this->room_stubs_.GetStub(*this->ServiceRegistryClient_, this->room_prefix_);
+    auto stub = this->room_stubs_.GetStubFromPrefix(
+        *this->ServiceRegistryClient_, 
+        this->config_.serviceRegistry.room_prefix_
+    );
     if(stub == nullptr) return;
 
     auto writer = stub->JoinRooms(&ctx, &response);
@@ -143,7 +155,10 @@ void BathPullClientReactor::OnDone(const ::grpc::Status& status) {
 
 void grpcClient::rpcBathPullMessageAsync(const std::string& message, std::function<void(const std::string&)> callback) {
 
-    auto stub = this->logic_stubs_.GetStub(*this->ServiceRegistryClient_, this->logic_prefix_);
+    auto stub = this->logic_stubs_.GetStubFromPrefix(
+        *this->ServiceRegistryClient_, 
+        this->config_.serviceRegistry.logic_prefix_
+    );
     if(stub == nullptr) return;
 
     new BathPullClientReactor(stub.get(), message, std::move(callback), 
@@ -162,7 +177,10 @@ void grpcClient::rpcIsSubSessionAsync(int32_t userid, std::string& room_id, cons
     request->set_userid(userid);
     request->set_room_id(room_id);
 
-    auto stub = this->room_stubs_.GetStub(*this->ServiceRegistryClient_, this->room_prefix_);
+    auto stub = this->room_stubs_.GetStubFromPrefix(
+        *this->ServiceRegistryClient_, 
+        this->config_.serviceRegistry.room_prefix_
+    );
     if(stub == nullptr) return;
 
     stub->async()->IsSubRoom(ctx.get(), request.get(), response.get(), 
@@ -182,7 +200,10 @@ void grpcClient::rpcPullMessageAsync(int64_t roomid, std::string& roomname, cons
     request->set_roomname(roomname);
     request->set_messageid(-1);
 
-    auto stub = this->logic_stubs_.GetStub(*this->ServiceRegistryClient_, this->logic_prefix_);
+    auto stub = this->logic_stubs_.GetStubFromPrefix(
+        *this->ServiceRegistryClient_, 
+        this->config_.serviceRegistry.logic_prefix_
+    );
     if(stub == nullptr) return;
 
     stub->async()->pullMessage(ctx.get(), request.get(), response.get(),

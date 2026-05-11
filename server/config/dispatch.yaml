@@ -1,7 +1,7 @@
 service:
-  name: gateway
-  instance_id: gw-1
+  name: dispatch
+  instance_id: dp-1
   host: 192.168.183.130
-  port: 5005
+  port: 5001
   io_thread_count: 6
   weight: 1

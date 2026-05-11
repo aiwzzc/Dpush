@@ -44,4 +44,6 @@ PRIVATE
     cpprest
     push_etcdnode
     proto_gen
+
+    push_config
 )

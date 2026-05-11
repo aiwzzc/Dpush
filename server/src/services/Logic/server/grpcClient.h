@@ -6,17 +6,27 @@
 #include <memory>
 #include <functional>
 
-class LogicDiscovery;
+#include <etcd/Client.hpp>
+#include <etcd/Watcher.hpp>
+
+#include "etcdServiceNode/ServiceRegistry.h"
+#include "etcdServiceNode/grpcClientPool.hpp"
+#include "LogicConfig.h"
+
+struct LogicConfig;
 
 class grpcClient {
 
 public:
-    grpcClient(LogicDiscovery* discover);
+    grpcClient(pulse::config::LogicConfig& config, 
+        pulse::net::ServiceRegistryClient* serviceRegistryClient);
 
     void sendSingleMsgAsync(const std::string&, int32_t userid, const std::string&, 
         const std::function<void()>&);
 
 private:
-    LogicDiscovery* discover_;
+    pulse::config::LogicConfig& config_;
+    pulse::net::ServiceRegistryClient* serviceRegistryClient_;
+    pulse::net::RpcClientPool<gateway::GatewayServer> gateway_stubs_;
 
 };

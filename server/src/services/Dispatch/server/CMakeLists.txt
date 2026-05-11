@@ -24,4 +24,6 @@ PUBLIC
     push_constants
     push_etcdnode
     push_fbs_proto
+    push_config
+    push_config_builder
 )

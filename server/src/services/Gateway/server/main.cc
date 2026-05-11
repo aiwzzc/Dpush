@@ -1,17 +1,27 @@
 #include "GatewayServer.h"
 #include "muduo/base/Logging.h"
-#include "config.h"
+#include "GatewayConfig.h"
+
+#include "RootConfig/RootConfigLoader.h"
+#include "ConfigBuilder/ConfigBuilder.h"
+
+#include <iostream>
+
+using namespace pulse::config;
 
 int main(int argc, char* argv[]) {
 
-    if(argc < 2) return -1;
+    if(argc < 3) return -1;
 
-    Config& config = Config::getInstance();
-    config.Parser(argv[1]);
-
+    ConfigBuilder builder(argc, argv);
+    GatewayConfig config = builder.Build<RootConfig, GatewayConfig>(
+        RootConfigLoader::LoadRoot,
+        GatewayConfigLoader::LoadGateway
+    );
+    
     muduo::Logger::setLogLevel(muduo::Logger::FATAL);
 
-    GatewayServer gatewayServer;
+    GatewayServer gatewayServer{config};
 
     gatewayServer.start();
 

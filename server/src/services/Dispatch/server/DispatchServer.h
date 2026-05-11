@@ -32,6 +32,8 @@
 #include "concurrency/coroutineTask.h"
 #include "etcdServiceNode/grpcClientPool.hpp"
 
+#include "DispatchConfig.h"
+
 struct GatewayInfo {
     int score;
     std::string gateway_url;
@@ -49,7 +51,7 @@ public:
         Unknown_error
     };
 
-    dispatchServer(const std::string& etcd_url);
+    dispatchServer(pulse::config::DispatchConfig& config);
     ~dispatchServer();
 
     void start();
@@ -114,7 +116,7 @@ private:
 
         GrpcReq grpc_req = req_parser(req.body().data());
 
-        auto stub = stubPool.GetStub(ServiceRegistryClient, prefix);
+        auto stub = stubPool.GetStubFromPrefix(ServiceRegistryClient, prefix);
         if(stub == nullptr) co_return;
 
         auto [status, grpc_res] = co_await MakeGrpcAwaiter<GrpcRes>(
@@ -137,10 +139,7 @@ private:
     using AuthStub = std::unique_ptr<auth::AuthServer::Stub>;
     using LogicStub = std::unique_ptr<logic::LogicServer::Stub>;
 
-    std::string etcd_url_;
-    std::string gateway_prefix_{"/services/gateway/"};
-    std::string auth_prefix_{"/services/auth/"};
-    std::string logic_prefix_{"/services/logic/"};
+    pulse::config::DispatchConfig config_;
 
     std::unique_ptr<HttpServer> server_;
 

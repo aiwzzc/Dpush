@@ -4,3 +4,10 @@ service:
   host: 192.168.183.130
   port: 5008
   weight: 1
+
+concurrency:
+  thread_pool_size: 6
+
+kafka_consumer:
+  topics:
+    - chat_room_messages

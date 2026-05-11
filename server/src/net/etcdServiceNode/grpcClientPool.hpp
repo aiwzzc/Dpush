@@ -35,9 +35,13 @@ public:
         }
     }
 
-    std::shared_ptr<typename T::Stub> GetStub(ServiceRegistryClient& registry, const std::string& prefix) {
+    std::shared_ptr<typename T::Stub> GetStubFromPrefix(ServiceRegistryClient& registry, const std::string& prefix) {
         std::string endpoint = registry.GetEndpoint(prefix);
 
+        return GetStubFromEndpoint(registry, endpoint);
+    }
+
+    std::shared_ptr<typename T::Stub> GetStubFromEndpoint(ServiceRegistryClient& registry, const std::string& endpoint) {
         std::shared_lock<std::shared_mutex> lock(this->mutex_);
 
         auto it = this->stubs_.find(endpoint);

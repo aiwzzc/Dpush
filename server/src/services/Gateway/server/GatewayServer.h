@@ -18,6 +18,7 @@
 #include "utils/types.h"
 
 #include "etcdServiceNode/ServiceRegistry.h"
+#include "GatewayConfig.h"
 
 namespace muduo {
 namespace net {
@@ -28,7 +29,7 @@ namespace net {
 class GatewayServer {
 
 public:
-    GatewayServer();
+    GatewayServer(pulse::config::GatewayConfig& config);
     ~GatewayServer();
 
     void start();
@@ -44,7 +45,7 @@ private:
     void collect_load_to_spsc();
     void write_load_to_redis(GatewayLoad& load);
 
-    std::string etcd_url_{"127.0.0.1:2379"};
+    pulse::config::GatewayConfig config_;
     pulse::net::ServiceRegistryClient ServiceRegistryClient_;
 
     std::unique_ptr<wsServer> wsServer_;

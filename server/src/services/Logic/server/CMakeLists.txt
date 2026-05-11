@@ -50,4 +50,7 @@ PRIVATE
     push_etcdnode
     etcd-cpp-api
     cpprest
+
+    push_config
+    push_config_builder
 )

@@ -2,9 +2,9 @@
 #include "producer.h"
 #include "iouring.h"
 #include "heartbeatManager.h"
-#include "config.h"
 #include "yyjson/JsonView.h"
 #include "constants/RedisKey.h"
+#include "constants/netAddress.h"
 
 using namespace pulse::constants;
 
@@ -43,20 +43,33 @@ std::unordered_map<int32_t, muduo::net::EventLoop*> GatewayServer::user_Eventloo
 std::shared_mutex GatewayServer::user_Eventloop_mutex_{};
 std::atomic<long> GatewayServer::conned_count_{0};
 
-GatewayServer::GatewayServer() : 
-ServiceRegistryClient_(etcd_url_),
-grpcClient_(std::make_unique<grpcClient>(&ServiceRegistryClient_)), 
+GatewayServer::GatewayServer(pulse::config::GatewayConfig& config): 
+config_(std::move(config)),
+ServiceRegistryClient_(this->config_.infra.etcdConfig.endpoints.front()), 
 GatewayPubSubManager_(std::make_unique<GatewayPubSubManager>()), 
 kafkaProducer_(std::make_unique<kafkaProducer>()) {
 
-    this->ServiceRegistryClient_.RegisterSelf("/services/gateway/", Config::getInstance().addr_);
-    this->grpcClient_->start();
+    std::string gateway_prefix = this->config_.infra.serviceRegistryConfig.gateway_service_prefix;
+    this->ServiceRegistryClient_.RegisterSelf(gateway_prefix, this->config_.endpoint);
 
-    WsServerContext ctx{this->grpcClient_.get(), this->kafkaProducer_.get()};
+    this->grpcClient_ = std::make_unique<grpcClient>(this->config_, &this->ServiceRegistryClient_);
+    this->grpcClient_->Init();
+
+    pulse::config::WsServerContext ctx{
+        this->grpcClient_.get(), 
+        this->kafkaProducer_.get(),
+        this->config_.endpoint
+    };
 
     this->wsServer_ = std::make_unique<wsServer>(
-    muduo::net::InetAddress{"0.0.0.0", (uint16_t)Config::getInstance().port_}, 
-    "wsServer", 6, ctx);
+        muduo::net::InetAddress{
+            pulse::net::kAnyAddr.data(), 
+            (uint16_t)this->config_.service.port
+        }, 
+        this->config_.service.name, 
+        this->config_.service.io_thread_count, 
+        ctx
+    );
 
     this->wsServer_->setThreadInitCallback([] (EventLoop* loop) {
         t_uring_ptr = std::make_unique<ThreadLocalUring>(loop);
@@ -70,19 +83,24 @@ kafkaProducer_(std::make_unique<kafkaProducer>()) {
 
     this->grpcServer_ = std::make_unique<GatewayGrpcServer>();
 
+    pulse::net::NetAddress grpc_listen_addr = 
+    pulse::net::NetAddress::AnyAddr(this->config_.service.port);
+
     grpc::ServerBuilder builder;
-    builder.AddListeningPort(Config::getInstance().listen_addr_, grpc::InsecureServerCredentials());
+    builder.AddListeningPort(grpc_listen_addr.GetUrl(), grpc::InsecureServerCredentials());
     builder.RegisterService(this->grpcServer_.get());
 
     this->load_queue_ = std::make_unique<moodycamel::ConcurrentQueue<GatewayLoad>>();
 
+    auto redis_endpoint = this->config_.infra.redisConfig.endpoints.front();
+
     sw::redis::ConnectionOptions connection_options;
-    connection_options.host = "127.0.0.1";
-    connection_options.port = 6379;
-    connection_options.db = 1;
+    connection_options.host = redis_endpoint.host;
+    connection_options.port = redis_endpoint.port;
+    connection_options.db = this->config_.infra.redisConfig.db;
 
     sw::redis::ConnectionPoolOptions pool_options;
-    pool_options.size = 6;
+    pool_options.size = this->config_.infra.redisConfig.pool_size;
 
     this->redisPool_ = std::make_unique<sw::redis::Redis>(connection_options, pool_options);
 }
@@ -150,7 +168,7 @@ void GatewayServer::collect_load_to_spsc() {
 }
 
 void GatewayServer::write_load_to_redis(GatewayLoad& load) {
-    this->redisPool_->hset(rediskey::GatewayLoadKey, Config::getInstance().addr_, build_load_json(load));
+    this->redisPool_->hset(rediskey::GatewayLoadKey, this->config_.endpoint, build_load_json(load));
 }
 
 void GatewayServer::start() {

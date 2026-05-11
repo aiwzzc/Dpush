@@ -6,6 +6,7 @@
 #include "room.pb.h"
 
 #include "etcdServiceNode/grpcClientPool.hpp"
+#include "GatewayConfig.h"
 
 #include <memory>
 #include <grpcpp/grpcpp.h>
@@ -22,11 +23,13 @@ class grpcClient {
 
 public:
 
-    grpcClient(pulse::net::ServiceRegistryClient* ServiceRegistryClient) : 
+    grpcClient(pulse::config::GatewayConfig& config, 
+    pulse::net::ServiceRegistryClient* ServiceRegistryClient): 
+    config_(config), 
     ServiceRegistryClient_(ServiceRegistryClient) {}
     ~grpcClient() = default;
 
-    void start();
+    void Init();
 
     void rpcCilentMessageAsync(const std::string& message, int32_t userid, std::string username, 
     std::function<void(std::string)> callback);
@@ -38,9 +41,7 @@ public:
     void rpcPullMessageAsync(int64_t roomid, std::string& roomname, const std::function<void(const std::string&)>& callback);
 
 private:
-    std::string logic_prefix_{"/services/logic/"};
-    std::string room_prefix_{"/services/room/"};
-
+    pulse::config::GatewayConfig& config_;
     pulse::net::ServiceRegistryClient* ServiceRegistryClient_;
     pulse::net::RpcClientPool<logic::LogicServer> logic_stubs_;
     pulse::net::RpcClientPool<room::RoomServer> room_stubs_;

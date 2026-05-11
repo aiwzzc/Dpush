@@ -8,26 +8,37 @@
 #include "fbs/http_codec.h"
 
 #include "constants/RedisKey.h"
+#include "constants/netAddress.h"
 
 #include <coroutine>
 
 using namespace pulse::constants;
 using namespace pulse::protocol;
 
-dispatchServer::dispatchServer(const std::string& etcd_url) :
-etcd_url_(etcd_url), ServiceRegistryClient_(etcd_url) {
+dispatchServer::dispatchServer(pulse::config::DispatchConfig& config):
+config_(std::move(config)), 
+ServiceRegistryClient_(this->config_.infra.etcdConfig.endpoints.front()) {
 
     muduo::Logger::setLogLevel(muduo::Logger::FATAL);
 
-    this->server_ = std::make_unique<HttpServer>(muduo::net::InetAddress{"0.0.0.0", 5001}, "HttpServer", 6);
+    this->server_ = std::make_unique<HttpServer>(
+        muduo::net::InetAddress{
+            pulse::net::kAnyAddr.data(), 
+            (uint16_t)this->config_.service.port
+        }, 
+        this->config_.service.name, 
+        this->config_.service.io_thread_count
+    );
+
+    auto redis_endpoint = this->config_.infra.redisConfig.endpoints.front();
 
     sw::redis::ConnectionOptions connection_options;
-    connection_options.host = "127.0.0.1";
-    connection_options.port = 6379;
-    connection_options.db = 1;
+    connection_options.host = redis_endpoint.host;
+    connection_options.port = redis_endpoint.port;
+    connection_options.db = this->config_.infra.redisConfig.db;
 
     sw::redis::ConnectionPoolOptions pool_options;
-    pool_options.size = 3;
+    pool_options.size = this->config_.infra.redisConfig.pool_size;
 
     this->redisPool_ = std::make_unique<sw::redis::Redis>(connection_options, pool_options);
 
@@ -128,11 +139,13 @@ DetachedTask dispatchServer::onDispatch(TcpConnectionPtr conn, HttpRequest req) 
 
         int count = std::min<std::size_t>(2, this->cached_gateways_.size());
 
+        auto gateway_endpoints = 
+        this->ServiceRegistryClient_.GetAllEndpoints(this->config_.serviceRegistry.gateway_prefix_);
+
         int index{0};
         while(valid_urls.size() < count && index < this->cached_gateways_.size()) {
             const std::string& gateway_url = this->cached_gateways_[index++].gateway_url;
 
-            auto gateway_endpoints = this->ServiceRegistryClient_.GetAllEndpoints(this->gateway_prefix_);
             if(gateway_endpoints.index_map_.contains(gateway_url)) {
                 valid_urls.push_back(gateway_url);
             }
@@ -162,7 +175,7 @@ DetachedTask dispatchServer::onDispatch(TcpConnectionPtr conn, HttpRequest req) 
 DetachedTask dispatchServer::onLogin(TcpConnectionPtr conn, HttpRequest req) {
     return GenericApiHandler<auth::LoginRequest, auth::LoginResponse>(
         conn, req, 
-        this->auth_client_pool_, this->ServiceRegistryClient_, this->auth_prefix_,
+        this->auth_client_pool_, this->ServiceRegistryClient_, this->config_.serviceRegistry.auth_prefix_,
         [] (const char* data) -> auth::LoginRequest {
             auto rootMsg = ChatApp::GetRootMessage(data);
             auto payload = rootMsg->payload_as_LoginHttpReqbodyPayload();
@@ -194,7 +207,7 @@ DetachedTask dispatchServer::onLogin(TcpConnectionPtr conn, HttpRequest req) {
 DetachedTask dispatchServer::onRegister(TcpConnectionPtr conn, HttpRequest req) {
     return GenericApiHandler<auth::RegisterRequest, auth::RegisterResponse>(
         conn, req, 
-        this->auth_client_pool_, this->ServiceRegistryClient_, this->auth_prefix_,
+        this->auth_client_pool_, this->ServiceRegistryClient_, this->config_.serviceRegistry.auth_prefix_,
         [] (const char* data) -> auth::RegisterRequest {
             auto rootMsg = ChatApp::GetRootMessage(data);
             auto payload = rootMsg->payload_as_RegisterHttpReqbodyPayload();
@@ -226,7 +239,7 @@ DetachedTask dispatchServer::onRegister(TcpConnectionPtr conn, HttpRequest req) 
 DetachedTask dispatchServer::onjoinSession(TcpConnectionPtr conn, HttpRequest req) {
     return GenericApiHandler<logic::joinSessionRequest, logic::joinSessionResponse>(
         conn, req, 
-        this->logic_client_pool_, this->ServiceRegistryClient_, this->logic_prefix_,
+        this->logic_client_pool_, this->ServiceRegistryClient_, this->config_.serviceRegistry.logic_prefix_,
         [] (const char* data) -> logic::joinSessionRequest {
             auto rootMsg = ChatApp::GetRootMessage(data);
             auto payload = rootMsg->payload_as_JoinSessionHttpReqbodyPayload();
@@ -257,7 +270,7 @@ DetachedTask dispatchServer::onjoinSession(TcpConnectionPtr conn, HttpRequest re
 DetachedTask dispatchServer::oncreateSession(TcpConnectionPtr conn, HttpRequest req) {
     return GenericApiHandler<logic::createSessionRequest, logic::createSessionResponse>(
         conn, req, 
-        this->logic_client_pool_, this->ServiceRegistryClient_, this->logic_prefix_,
+        this->logic_client_pool_, this->ServiceRegistryClient_, this->config_.serviceRegistry.logic_prefix_,
         [] (const char* data) -> logic::createSessionRequest {
             auto rootMsg = ChatApp::GetRootMessage(data);
             auto payload = rootMsg->payload_as_createSessionHttpReqbodyPayload();
@@ -287,13 +300,16 @@ DetachedTask dispatchServer::oncreateSession(TcpConnectionPtr conn, HttpRequest 
 
 void dispatchServer::start() {
 
-    this->ServiceRegistryClient_.RegisterSelf("/services/dispatch/", "192.168.183.130:5001");
+    this->ServiceRegistryClient_.RegisterSelf(
+        this->config_.infra.serviceRegistryConfig.dispatch_service_prefix, 
+        this->config_.endpoint
+    );
 
-    this->ServiceRegistryClient_.Subscribe(this->gateway_prefix_, 
+    this->ServiceRegistryClient_.Subscribe(this->config_.serviceRegistry.gateway_prefix_, 
     [] (const etcd::Event& event) {});
 
-    this->auth_client_pool_.Init(this->ServiceRegistryClient_, this->auth_prefix_);
-    this->logic_client_pool_.Init(this->ServiceRegistryClient_, this->logic_prefix_);
+    this->auth_client_pool_.Init(this->ServiceRegistryClient_, this->config_.serviceRegistry.auth_prefix_);
+    this->logic_client_pool_.Init(this->ServiceRegistryClient_, this->config_.serviceRegistry.logic_prefix_);
 
     this->sync_worker_ = std::thread([this] () {
         this->BackendSyncTask();

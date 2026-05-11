@@ -9,6 +9,7 @@
 
 #include "constants/RedisKey.h"
 #include "constants/protocol_fields.h"
+#include "constants/err_code.h"
 
 #include "chat_generated.h"
 
@@ -118,7 +119,7 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
     RdKafka::Headers* header = message->headers();
 
     if(!header) {
-        std::cout << "Retry" << std::endl;
+        
         return;
     }
 
@@ -243,14 +244,14 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
         }
 
     } catch(const sw::redis::Error& e) {
-        std::cerr << "Redis Pipeline execution failed: " << e.what() << std::endl;
+        std::cerr << err::KRedisPipelineExeFailedErrorMsg << e.what() << std::endl;
         return;
     }
 
     RdKafka::Error* err = message->offset_store();
 
     if (err) {
-        std::cerr << "Failed to store offset: " << err->str() << std::endl;
+        std::cerr << err::KKafkaFailedStoreOffsetErrorMsg << err->str() << std::endl;
         delete err;
     }
 }
