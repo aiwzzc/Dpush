@@ -26,12 +26,16 @@ std::mutex GatewayPubSubManager::loops_mtx_{};
 
 LRUCache<int32_t, std::vector<std::string>> GatewayPubSubManager::UserRoomLRU_{10000};
 
-GatewayPubSubManager::GatewayPubSubManager() {
+GatewayPubSubManager::GatewayPubSubManager(pulse::config::GatewayConfig& config):
+config_(config) {
+
+    auto redis_endpoints = this->config_.infra.redisConfig.endpoints;
+
     sw::redis::ConnectionOptions opts;
-    opts.host = "127.0.0.1";
-    opts.port = 6379;
-    opts.db = 1;
-    opts.socket_timeout = std::chrono::milliseconds(100); // 100毫秒超时
+    opts.host = redis_endpoints.front().host;
+    opts.port = redis_endpoints.front().port;
+    opts.db = this->config_.infra.redisConfig.db;
+    opts.socket_timeout = std::chrono::milliseconds(this->config_.infra.redisConfig.timeout_ms); // 100毫秒超时
 
     auto redis_for_sub = sw::redis::Redis(opts);
     this->sub_ = std::make_unique<sw::redis::Subscriber>(redis_for_sub.subscriber());
@@ -174,7 +178,7 @@ void GatewayPubSubManager::ConsumLoop() {
             continue;
 
         } catch(const std::exception &e) {
-            std::cerr << "Redis Subscriber Error: " << e.what() << std::endl;
+            // std::cerr << "Redis Subscriber Error: " << e.what() << std::endl;
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     }

@@ -26,4 +26,5 @@ PUBLIC
     push_fbs_proto
     push_config
     push_config_builder
+    push_log
 )

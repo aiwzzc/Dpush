@@ -13,7 +13,7 @@ redis:
 
   db: 1
   pool_size: 6
-  timeout_ms: 2000
+  timeout_ms: 100
 
 mysql:
   endpoints:

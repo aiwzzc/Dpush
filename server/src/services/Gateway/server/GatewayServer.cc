@@ -46,7 +46,7 @@ std::atomic<long> GatewayServer::conned_count_{0};
 GatewayServer::GatewayServer(pulse::config::GatewayConfig& config): 
 config_(std::move(config)),
 ServiceRegistryClient_(this->config_.infra.etcdConfig.endpoints.front()), 
-GatewayPubSubManager_(std::make_unique<GatewayPubSubManager>()), 
+GatewayPubSubManager_(std::make_unique<GatewayPubSubManager>(this->config_)), 
 kafkaProducer_(std::make_unique<kafkaProducer>()) {
 
     std::string gateway_prefix = this->config_.infra.serviceRegistryConfig.gateway_service_prefix;

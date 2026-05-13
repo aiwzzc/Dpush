@@ -2,7 +2,6 @@
 
 #include <memory>
 #include <thread>
-#include <mutex>
 #include <unordered_map>
 #include <shared_mutex>
 #include <atomic>

@@ -128,6 +128,12 @@ add_custom_target(fbs_generate ALL DEPENDS ${GEN_FBS_HDRS})
 add_subdirectory(third_party)
 add_subdirectory(src)
 
+option(BUILD_BENCHMARKS "Build the benchmark suite" ON)
+
+if(BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
+endif()
+
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     message("Compile Debug")
     # 针对 Debug 构建类型，添加一些常见的调试相关编译选项，比如开启调试符号等

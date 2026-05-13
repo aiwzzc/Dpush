@@ -6,7 +6,6 @@
 #include <atomic>
 #include <vector>
 #include <string>
-#include <iostream>
 #include <array>
 #include <unordered_map>
 #include <unordered_set>
@@ -14,6 +13,8 @@
 
 #include "muduo/net/EventLoop.h"
 #include "LRUCache.h"
+
+#include "GatewayConfig.h"
 
 class WsSession;
 using WsSessionPtr = std::shared_ptr<WsSession>;
@@ -51,7 +52,7 @@ public:
 
     static LRUCache<int32_t, std::vector<std::string>> UserRoomLRU_; 
 
-    GatewayPubSubManager();
+    GatewayPubSubManager(pulse::config::GatewayConfig& config);
     ~GatewayPubSubManager();
 
     static void SubscribeRoomSafe(const std::string& roomid);
@@ -63,6 +64,8 @@ public:
 
 private:
     void ConsumLoop();
+
+    pulse::config::GatewayConfig& config_;
 
     std::unique_ptr<sw::redis::Subscriber> sub_;
     std::thread consume_thread_;
