@@ -5,8 +5,6 @@
 #include "RootConfig/RootConfigLoader.h"
 #include "ConfigBuilder/ConfigBuilder.h"
 
-#include <iostream>
-
 using namespace pulse::config;
 
 int main(int argc, char* argv[]) {

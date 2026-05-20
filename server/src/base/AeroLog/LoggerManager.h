@@ -6,6 +6,7 @@
 #include "Logging.h"
 #include "AsyncWorker.h"
 #include "LogSink.h"
+#include "LoggerConfig.h"
 
 namespace pulse::Logger {
 
@@ -21,6 +22,7 @@ public:
 
     static void addSink(LogSinkPtr sink);
     static void start();
+    static void start(const LoggerConfig& config);
 
 private:
     AsyncWorkerPtr worker_;

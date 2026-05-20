@@ -19,15 +19,12 @@ LogFile::~LogFile() {
     }
 }
 
-
 void LogFile::append(const char* data, std::size_t len) {
     std::size_t written = ::fwrite(data, 1, len, this->fp_);
 
     if(written != len) {
         throw std::runtime_error("fwrite error");
     }
-
-    this->flush();
 }
 
 void LogFile::flush() {

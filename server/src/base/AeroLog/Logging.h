@@ -1,25 +1,20 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <format>
 #include <source_location>
 #include <string>
-#include <thread>
 #include <memory>
 #include <string_view>
+#include <thread>
+#include <atomic>
 
+#include "LoggerConfig.h"
 #include "AsyncWorker.h"
+#include "LogBuffer.h"
 
 namespace pulse::Logger {
-
-enum class LogLevel {
-    TRACE = 0,
-    DEBUG,
-    INFO,
-    WARN,
-    ERROR,
-    FATAL
-};
 
 class Logger {
 
@@ -27,39 +22,81 @@ public:
     Logger(const std::string& name, LogLevel level, AsyncWorker* worker);
 
     template<typename... Args>
-    void log(LogLevel level, const std::source_location& loc, 
-        std::format_string<Args...> fmt, Args&&... args) {
-
+    void log(
+        LogLevel level, 
+        const std::source_location& loc, 
+        std::format_string<Args...> fmt, 
+        Args&&... args
+    ) {
+        
         if(!shouldLog(level)) return;
 
-        std::string payload = std::format(fmt, std::forward<Args>(args)...);
+        // auto now = std::chrono::system_clock::now();
+        // auto time = std::format("{:%Y-%m-%d %H:%M:%S}", now);
+        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
 
-        auto now = std::chrono::system_clock::now();
-        auto tid = std::hash<std::thread::id>{}(std::this_thread::get_id());
-        auto time = std::format("{:%Y-%m-%d %H:%M:%S}", now);
+        auto tid = GetTid();
         const char* level_str = LogLevel2String(level);
         std::string_view file_name = basename(loc.file_name());
 
-        std::string final_log = std::format(
-            "[{}] [{}] [tid:{}] [{}:{}] {}\n", time, level_str, 
+        LogEntry entry;
+        char* out = entry.buffer;
+        uint32_t remain = KMaxLogLineSize;
+
+        auto header_res = std::format_to_n(
+            out, remain, 
+            "[{}] [{}] [tid:{}] [{}:{}] ", 
+            now_ms, 
+            level_str, 
             tid,
             file_name,
-            loc.line(),
-            payload
+            loc.line()
         );
 
-        AppendToThreadLocalBuffer(final_log.data(), final_log.size());
+        std::size_t header_len = std::min<std::size_t>(header_res.size, remain);
+        out += header_len;
+        remain -= header_len;
+
+        auto payload_res = std::format_to_n(
+            out, remain, 
+            fmt,
+            std::forward<Args>(args)...
+        );
+
+        std::size_t payload_len = std::min<std::size_t>(payload_res.size, remain);
+        out += payload_len;
+        remain -= payload_len;
+
+        if(remain > 0) {
+            *out = '\n';
+            ++out;
+        }
+
+        entry.len += header_len + payload_len + 1;
+        this->worker_->appendMpscBuffers(std::move(entry));
+        // this->worker_->notifyBackend();
     }
 
+    void setLevel(LogLevel level);
+    LogLevel getLevel() const;
+
 private:
-    void AppendToThreadLocalBuffer(const char* data, std::size_t len);
     bool shouldLog(LogLevel level) const;
     const char* LogLevel2String(LogLevel level);
     std::string_view basename(std::string_view path);
 
+    inline uint32_t GetTid() {
+        thread_local uint32_t tid = static_cast<uint32_t>(
+            std::hash<std::thread::id>{}(std::this_thread::get_id())
+        );
+
+        return tid;
+    }
+
 private:
     std::string name_;
-    LogLevel level_;
+    std::atomic<LogLevel> level_;
 
     AsyncWorker* worker_;
 

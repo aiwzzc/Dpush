@@ -1,10 +1,6 @@
 #include "Logging.h"
-#include "LogBuffer.h"
 
-#include <mutex>
-#include <condition_variable>
-#include <memory>
-#include <vector>
+#include <atomic>
 
 namespace pulse::Logger {
 
@@ -53,20 +49,12 @@ std::string_view Logger::basename(std::string_view path) {
     return path.substr(pos + 1);
 }
 
-void Logger::AppendToThreadLocalBuffer(const char* data, std::size_t len) {
-    if(!data || len <= 0) return;
+void Logger::setLevel(LogLevel level) {
+    this->level_.store(level, std::memory_order_relaxed);
+}
 
-    if(len > KLogBufferSize) return;
-
-    thread_local LogBufferPtr tl_buffer = std::make_unique<LogBuffer>();
-
-    if(tl_buffer->writableBytes() < len) {
-        worker_->appendFullBuffers(std::move(tl_buffer));
-
-        tl_buffer = std::make_unique<LogBuffer>();
-    }
-
-    tl_buffer->append(data, len);
+LogLevel Logger::getLevel() const {
+    return this->level_.load(std::memory_order_relaxed);
 }
 
 }; // namespace pulse::Logger

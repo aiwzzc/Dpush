@@ -1,2 +1,2 @@
 CompileFlags:
-  CompilationDatabase: "server/build" # 告诉 clangd 到这个目录找 compile_commands.json
+  CompilationDatabase: "server/build"

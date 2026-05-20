@@ -1,20 +1,26 @@
 #pragma once
 
-#include <mutex>
-#include <condition_variable>
 #include <thread>
 #include <vector>
 #include <memory>
+#include <atomic>
 
 #include "LogBuffer.h"
 #include "LogSink.h"
+#include "MPSC.hpp"
 
 namespace pulse::Logger {
+
+inline constexpr std::size_t KMpscRingBufferCapacity = 65536;
+inline constexpr std::size_t KBatchBufferSize = 4 * 1024 * 1024;
 
 class AsyncWorker {
 
 public:
-    void appendFullBuffers(LogBufferPtr tl_buffer);
+    ~AsyncWorker();
+
+    void appendMpscBuffers(LogEntry&& entry);
+    void notifyBackend();
 
     void start();
     void stop();
@@ -26,11 +32,10 @@ private:
 private:
     std::vector<LogSinkPtr> sinks_;
 
-    std::mutex g_mutex_;
-    std::condition_variable g_cond_;
-    std::vector<LogBufferPtr> g_full_buffers_;
-    std::thread backend_thread_;
+    MpscRingBuffer<LogEntry, KMpscRingBufferCapacity> mpsc_;
+    std::atomic<int> pending_counts_{0};
 
+    std::thread backend_thread_;
     bool running_{true};
 
 };

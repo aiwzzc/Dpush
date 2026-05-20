@@ -10,8 +10,6 @@
 #include "constants/RedisKey.h"
 #include "constants/netAddress.h"
 
-#include <coroutine>
-
 using namespace pulse::constants;
 using namespace pulse::protocol;
 

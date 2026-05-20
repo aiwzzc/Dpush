@@ -51,4 +51,24 @@ void LoggerManager::start() {
     Instance().worker_->start();
 }
 
+void LoggerManager::start(const LoggerConfig& config) {
+    if(!Instance().worker_) {
+        Instance().worker_ = std::make_unique<AsyncWorker>();
+    }
+
+    Instance().default_logger_ = std::make_shared<Logger>(
+        "default", config.default_Logger_level, Instance().worker_.get()
+    );
+
+    if(config.enable_console) {
+        Instance().worker_->addSink(std::make_shared<ConsoleSink>());
+    }
+
+    if(!config.file_path.empty()) {
+        Instance().worker_->addSink(std::make_shared<FileSink>(config.file_path));
+    }
+
+    Instance().worker_->start();
+}
+
 };

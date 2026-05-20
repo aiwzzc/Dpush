@@ -5,10 +5,8 @@
 #include <string_view>
 #include <vector>
 #include <algorithm>
-#include <mutex>
 #include <shared_mutex>
 #include <thread>
-#include <unordered_set>
 #include <optional>
 
 #include <etcd/Client.hpp>

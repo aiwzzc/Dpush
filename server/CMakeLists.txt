@@ -134,6 +134,8 @@ if(BUILD_BENCHMARKS)
     add_subdirectory(benchmarks)
 endif()
 
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -DNDEBUG")
+
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     message("Compile Debug")
     # 针对 Debug 构建类型，添加一些常见的调试相关编译选项，比如开启调试符号等
