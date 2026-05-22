@@ -23,6 +23,7 @@ public:
     static void addSink(LogSinkPtr sink);
     static void start();
     static void start(const LoggerConfig& config);
+    static void stop();
 
 private:
     AsyncWorkerPtr worker_;

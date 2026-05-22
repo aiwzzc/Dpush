@@ -6,7 +6,6 @@
 #include "concurrency/coroutineTask.h"
 #include "concurrency/ComputeThreadPool.h"
 
-#include <vector>
 #include <grpcpp/grpcpp.h>
 #include <sw/redis++/redis++.h>
 #include <boost/asio.hpp>

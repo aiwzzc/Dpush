@@ -53,4 +53,5 @@ PRIVATE
 
     push_config
     push_config_builder
+    push_log
 )

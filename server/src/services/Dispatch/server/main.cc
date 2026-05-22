@@ -26,7 +26,7 @@ int main(int argc, char* argv[]) {
         DispatchConfigLoader::LoadDispatch
     );
 
-    LOG_INFO("{}", "Dispatch Server Start Success");
+    LOG_INFO("Dispatch Server Start Success");
 
     dispatchServer server{config};
 

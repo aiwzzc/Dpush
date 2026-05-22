@@ -38,6 +38,11 @@ void LoggerManager::addSink(LogSinkPtr sink) {
     Instance().worker_->addSink(sink);
 }
 
+void LoggerManager::stop() {
+    Instance().worker_->stop();
+    Instance().loggers_.clear();
+}
+
 void LoggerManager::start() {
     if(!Instance().worker_) {
         Instance().worker_ = std::make_unique<AsyncWorker>();

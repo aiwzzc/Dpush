@@ -8,51 +8,57 @@
 
 #define LOG_INFO(fmt, ...)  \
     do {                    \
-        pulse::Logger::Log::log(pulse::Logger::LogLevel::INFO, \
-        std::source_location::current(), \
-        fmt, \
-        ##__VA_ARGS__);     \
-    } while(0)              \
+        pulse::Logger::Log::log(            \
+            pulse::Logger::LogLevel::INFO, \
+            std::source_location::current(), \
+            fmt __VA_OPT__(,) __VA_ARGS__ \
+        );     \
+    } while(0)              
 
 #define LOG_TRACE(fmt, ...) \
     do {                    \
-        pulse::Logger::Log::log(pulse::Logger::LogLevel::TRACE, \
-        std::source_location::current(), \
-        fmt, \
-        ##__VA_ARGS__);     \
-    } while(0)              \
+        pulse::Logger::Log::log(            \
+            pulse::Logger::LogLevel::TRACE, \
+            std::source_location::current(), \
+            fmt __VA_OPT__(,) __VA_ARGS__ \
+        );     \
+    } while(0)              
 
 #define LOG_DEBUG(fmt, ...) \
     do {                    \
-        pulse::Logger::Log::log(pulse::Logger::LogLevel::DEBUG, \
-        std::source_location::current(), \
-        fmt, \
-        ##__VA_ARGS__);     \
-    } while(0)              \
+        pulse::Logger::Log::log(           \
+            pulse::Logger::LogLevel::DEBUG, \
+            std::source_location::current(), \
+            fmt __VA_OPT__(,) __VA_ARGS__   \
+        );     \
+    } while(0)              
 
 #define LOG_WARN(fmt, ...)  \
     do {                    \
-        pulse::Logger::Log::log(pulse::Logger::LogLevel::WARN, \
-        std::source_location::current(), \
-        fmt, \
-        ##__VA_ARGS__);     \
-    } while(0);             \
+        pulse::Logger::Log::log(            \
+            pulse::Logger::LogLevel::WARN, \
+            std::source_location::current(), \
+            fmt __VA_OPT__(,) __VA_ARGS__   \
+        );     \
+    } while(0)
 
-#define LOG_ERROR(fmt, ...) \
-    do {                    \
-        pulse::Logger::Log::log(pulse::Logger::LogLevel::ERROR, \
-        std::source_location::current(), \
-        fmt, \
-        ##__VA_ARGS__);     \
-    } while(0);             \
+#define LOG_ERROR(fmt, ...)         \
+    do {                           \
+        pulse::Logger::Log::log(        \
+            pulse::Logger::LogLevel::ERROR, \
+            std::source_location::current(), \
+            fmt __VA_OPT__(,) __VA_ARGS__   \
+        );                             \
+    } while(0)   
 
 #define LOG_FATAL(fmt, ...) \
     do {                    \
-        pulse::Logger::Log::log(pulse::Logger::LogLevel::FATAL, \
-        std::source_location::current(), \
-        fmt, \
-        ##__VA_ARGS__);     \
-    } while(0);             \
+        pulse::Logger::Log::log(        \
+            pulse::Logger::LogLevel::FATAL, \
+            std::source_location::current(), \
+            fmt __VA_OPT__(,) __VA_ARGS__ \
+        );     \
+    } while(0)
 
 namespace pulse::Logger {
 

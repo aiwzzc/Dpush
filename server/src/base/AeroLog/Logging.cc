@@ -50,11 +50,11 @@ std::string_view Logger::basename(std::string_view path) {
 }
 
 void Logger::setLevel(LogLevel level) {
-    this->level_.store(level, std::memory_order_relaxed);
+    this->level_.store(level, std::memory_order_release);
 }
 
 LogLevel Logger::getLevel() const {
-    return this->level_.load(std::memory_order_relaxed);
+    return this->level_.load(std::memory_order_acquire);
 }
 
 }; // namespace pulse::Logger

@@ -16,6 +16,8 @@
 
 namespace pulse::Logger {
 
+constexpr int KSpscEnqueueSpinCount = 10;
+
 class Logger {
 
 public:
@@ -39,6 +41,8 @@ public:
         auto tid = GetTid();
         const char* level_str = LogLevel2String(level);
         std::string_view file_name = basename(loc.file_name());
+
+        thread_local auto spsc = this->worker_->RegisterThread();
 
         LogEntry entry;
         char* out = entry.buffer;
@@ -74,8 +78,15 @@ public:
         }
 
         entry.len += header_len + payload_len + 1;
-        this->worker_->appendMpscBuffers(std::move(entry));
+        // this->worker_->appendMpscBuffers(std::move(entry));
         // this->worker_->notifyBackend();
+
+        if(!spsc->enqueue(std::move(entry))) {
+            for(int i = 0 ; i < KSpscEnqueueSpinCount; ++i) {
+                if(spsc->enqueue(std::move(entry))) return;
+                std::this_thread::yield();
+            }
+        }
     }
 
     void setLevel(LogLevel level);

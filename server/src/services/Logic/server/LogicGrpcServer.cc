@@ -1,7 +1,5 @@
 #include "LogicGrpcServer.h"
 
-#include "room.grpc.pb.h"
-#include "room.pb.h"
 #include "chat_generated.h"
 
 #include "utils/SnowflakeIdWorker.h"

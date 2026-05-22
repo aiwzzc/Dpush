@@ -1,9 +1,6 @@
 #include "KafkaConsumer.h"
 #include "grpcClient.h"
-#include <iostream>
 #include <charconv>
-
-#include "concurrency/coroutineTask.h"
 
 #include "utils/types.h"
 
@@ -13,7 +10,10 @@
 
 #include "chat_generated.h"
 
+#include "AeroLog/LogApi.h"
+
 using namespace pulse::constants;
+using namespace pulse::Logger;
 
 KafkaConsumer::KafkaConsumer(const std::string& brokers, const std::string& group_id, 
     const std::vector<std::string>& topics, OrderedThreadPool* ordthreadpool, 
@@ -80,7 +80,8 @@ void KafkaConsumer::start_consuming() {
             }
 
             default:
-                std::cerr << "Consume failed: " << message->errstr() << std::endl;
+                // std::cerr << "Consume failed: " << message->errstr() << std::endl;
+                LOG_ERROR("Consume failed: {}", message->errstr());
                 break;
         }
     }
@@ -119,7 +120,7 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
     RdKafka::Headers* header = message->headers();
 
     if(!header) {
-        
+        LOG_WARN("{}", "Kafka Header is empty");
         return;
     }
 
@@ -245,13 +246,15 @@ void KafkaConsumer::process_message(RdKafka::Message* message) {
 
     } catch(const sw::redis::Error& e) {
         std::cerr << err::KRedisPipelineExeFailedErrorMsg << e.what() << std::endl;
+        LOG_ERROR("{}: {}", err::KRedisPipelineExeFailedErrorMsg, e.what());
         return;
     }
 
     RdKafka::Error* err = message->offset_store();
 
     if (err) {
-        std::cerr << err::KKafkaFailedStoreOffsetErrorMsg << err->str() << std::endl;
+        // std::cerr << err::KKafkaFailedStoreOffsetErrorMsg << err->str() << std::endl;
+        LOG_ERROR("{}: {}", err::KKafkaFailedStoreOffsetErrorMsg, err->str());
         delete err;
     }
 }

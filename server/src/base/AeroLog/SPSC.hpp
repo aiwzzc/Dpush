@@ -74,7 +74,6 @@ public:
         return result;
     }
 
-    // 两次load之间状态可能发生变化;也就是size()为近似值;并不是当前快照
     std::size_t size_approx() const noexcept {
         const std::size_t read = this->consumer_.r_idx_.load(std::memory_order_acquire);
         const std::size_t write = this->producer_.w_idx_.load(std::memory_order_acquire);
@@ -102,16 +101,13 @@ private:
     };
 
     alignas(KSCacheLineSize) ProducerState producer_;
-    char pad_producer_[KSCacheLineSize - sizeof(ProducerState)]{};
-
     alignas(KSCacheLineSize) ConsumerState consumer_;
-    char pad_consumer_[KSCacheLineSize - sizeof(ConsumerState)]{};
 
     struct Slot {
         alignas(T) std::byte storage[sizeof(T)];
     };
 
-    Slot buffer_[Capacity];
+    alignas(KSCacheLineSize) Slot buffer_[Capacity];
     char pad_end_[KSCacheLineSize]{};
 
 };

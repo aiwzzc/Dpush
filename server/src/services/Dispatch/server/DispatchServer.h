@@ -20,9 +20,7 @@
 #include "constants/http_constants.h"
 
 #include "auth.grpc.pb.h"
-#include "auth.pb.h"
 #include "logic.grpc.pb.h"
-#include "logic.pb.h"
 
 #include <grpcpp/grpcpp.h>
 
