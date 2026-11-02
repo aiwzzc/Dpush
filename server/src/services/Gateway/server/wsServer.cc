@@ -1,4 +1,5 @@
 #include "wsServer.h"
+#include "AeroLog/LogApi.h"
 #include "muduo/net/TcpConnection.h"
 #include "muduo/net/Buffer.h"
 #include "websocketSession.h"
@@ -342,20 +343,53 @@ bool wsServer::processHandshake(const std::string& header, const muduo::net::Tcp
         return false;
     }
 
+    // LOG_INFO("{}", header);
+
     std::string cookie = AnalysisCookie(header);
-    if(cookie.empty()) return false;
+    // if(cookie.empty()) return false;
 
-    jwt* decoded = nullptr;
+    // jwt* decoded = nullptr;
 
-    if(jwt_decode(&decoded, cookie.c_str(), (unsigned char*)GatewayServer::public_key, 
-    strlen(GatewayServer::public_key)) != 0) return false;
+    // if(jwt_decode(&decoded, cookie.c_str(), (unsigned char*)GatewayServer::public_key, 
+    // strlen(GatewayServer::public_key)) != 0) return false;
 
-    int32_t userid = jwt_get_grant_int(decoded, protocol::USER_ID.data());
-    const char* uname_ptr = jwt_get_grant(decoded, protocol::USERNAME.data());
-    std::string username = uname_ptr ? uname_ptr : "";
+    // int32_t userid = jwt_get_grant_int(decoded, protocol::USER_ID.data());
+    // const char* uname_ptr = jwt_get_grant(decoded, protocol::USERNAME.data());
+    // std::string username = uname_ptr ? uname_ptr : "";
     
-    jwt_free(decoded);
-    if(username.empty()) return false;
+    // jwt_free(decoded);
+    // if(username.empty()) return false;
+
+    int32_t userid{0};
+    std::string username;
+
+    if(cookie.empty()) {
+        std::size_t pos_start = header.find("GET ");
+        std::size_t pos_end = header.find(" HTTP/1.1\r\n");
+        if(pos_start == std::string::npos || pos_end == std::string::npos) return false;
+
+        std::string userid_str = header.substr(pos_start + 4, pos_end - pos_start);
+
+        // LOG_INFO("{}\n {}", header, conn->fd());
+
+        userid = std::stoi(userid_str);
+        username = "user_" + std::to_string(userid - 32);
+
+        LOG_INFO("{} {}", userid, username);
+
+    } else {
+        jwt* decoded = nullptr;
+
+        if(jwt_decode(&decoded, cookie.c_str(), (unsigned char*)GatewayServer::public_key, 
+        strlen(GatewayServer::public_key)) != 0) return false;
+
+        userid = jwt_get_grant_int(decoded, protocol::USER_ID.data());
+        const char* uname_ptr = jwt_get_grant(decoded, protocol::USERNAME.data());
+        username = uname_ptr ? uname_ptr : "";
+        
+        jwt_free(decoded);
+        if(username.empty()) return false;
+    }
 
     std::string upgrade_resp = HandleUpgradeResponse(header);
     if (upgrade_resp.find("101") == std::string::npos) {
@@ -373,6 +407,9 @@ bool wsServer::processHandshake(const std::string& header, const muduo::net::Tcp
 
 void wsServer::onMessage(const TcpConnectionPtr& conn, Buffer* buffer) {
     auto session = *std::any_cast<std::shared_ptr<WsSession>>(conn->getMutableContext());
+
+    // LOG_INFO("{}", std::string(buffer->peek(), buffer->readableBytes()));
+    LOG_INFO("{}", conn->fd());
 
     if(session->state_ == WsState::EXPECTING_HTTP_REQUEST) {
         const char* crlf = buffer->find(k2CRLF, 4);

@@ -3,7 +3,6 @@
 #include <librdkafka/rdkafkacpp.h>
 #include <memory>
 
-#include "websocketSession.h"
 #include "muduo/net/TcpConnection.h"
 
 class MyDeliveryReportCb;

@@ -1,14 +1,15 @@
-#include "../../GatewayServer/muduo/net/TcpServer.h"
-#include "../../GatewayServer/muduo/net/EventLoop.h"
-#include "../../GatewayServer/muduo/net/TcpClient.h"
-#include "../../GatewayServer/muduo/net/EventLoopThreadPool.h"
-#include "../../GatewayServer/muduo/net/TcpConnection.h"
-#include "../../GatewayServer/muduo/net/Buffer.h"
-#include "../../GatewayServer/muduo/base/Timestamp.h"
-#include "../../GatewayServer/muduo/base/Logging.h"
-#include "../../flatbuffers/chat_generated.h"
 
-using muduo::net::TcpServer;
+#include "muduo/net/TcpServer.h"
+#include "muduo/net/EventLoop.h"
+#include "muduo/net/TcpClient.h"
+#include "muduo/net/EventLoopThreadPool.h"
+#include "muduo/net/TcpConnection.h"
+#include "muduo/net/Buffer.h"
+#include "muduo/base/Timestamp.h"
+#include "muduo/base/Logging.h"
+
+#include "chat_generated.h"
+
 using muduo::net::EventLoop;
 using muduo::net::InetAddress;
 using muduo::net::TcpClient;
@@ -20,11 +21,9 @@ using muduo::Logger;
 
 #include <vector>
 #include <atomic>
-#include <memory>
 #include <chrono>
 #include <mutex>
 #include <algorithm>
-#include <array>
 #include <thread>
 #include <climits>
 
@@ -46,8 +45,8 @@ Sec-WebSocket-Key: NKjXvd3uVRzql3IvEKX/YQ==
 Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
 */
 
-constexpr std::size_t LoopThreadNum = 6;
-constexpr std::size_t ConnNum       = 100000;
+constexpr std::size_t LoopThreadNum = 2;
+constexpr std::size_t ConnNum       = 10;
 
 static inline long long getCurrentTimestamp() {
     auto now = std::chrono::system_clock::time_point::clock::now();
@@ -106,6 +105,8 @@ public:
     }
 
     void onConnection(const TcpConnectionPtr& conn) {
+        LOG_WARN << "onConnection";
+
         if(conn->connected()) {
             this->successNum_.fetch_add(1, std::memory_order_relaxed);
 
@@ -150,9 +151,9 @@ public:
             auto rootMsg = ChatApp::GetRootMessage(payload_ptr);
             if (rootMsg) {
                 auto payload = rootMsg->payload_as_ServerMessagePayload();
-                if (payload && payload->messages() && payload->messages()->size() > 0) {
+                if (payload && payload->messages()) {
                     
-                    long long server_send_ts{payload->messages()->begin()->timestamp()};
+                    long long server_send_ts{payload->messages()->timestamp()};
                     long long latency = current_time - server_send_ts;
 
                     local_latencies->push_back(latency);
@@ -175,6 +176,10 @@ public:
             calculateMetrics();
             this->calc_done_ = true;
         }
+    }
+
+    long long getSuccessNum() const {
+        return this->successNum_.load(std::memory_order_acquire);
     }
 
 private:
@@ -260,9 +265,10 @@ int main(int agrc, char** agrv) {
         EventLoop* loop = loops.getNextLoop();
 
         char name[32];
-        snprintf(name, sizeof name, "client_%zu", i);
+        snprintf(name, sizeof name, "client_%d", i);
 
-        uint16_t port = 5003 + (i % 3);
+        // uint16_t port = 5003 + (i % 3);
+        uint16_t port = 5005;
         InetAddress addr("192.168.183.130", port);
 
         auto clientServer = std::make_unique<TcpClient>(loop, addr, name);
@@ -273,22 +279,27 @@ int main(int agrc, char** agrv) {
         });
 
         clientServer->setMessageCallback([&perfMonitor] (const TcpConnectionPtr& conn, Buffer* buf, Timestamp time) {
-            perfMonitor.onMessage(conn, buf, time);
+            // perfMonitor.onMessage(conn, buf, time);
         });
 
         clientServers.emplace_back(std::move(clientServer));
     }
 
-    loop.runEvery(1.0, [&perfMonitor] () {
-        perfMonitor.printStats();
-    });
+    // loop.runEvery(1.0, [&perfMonitor] () {
+    //     perfMonitor.printStats();
+    // });
 
-    std::thread connectThread([&clientServers]() {
+    LOG_WARN << clientServers.size();
+
+    std::thread connectThread([&clientServers, &perfMonitor]() {
         for(int i = 0; i < ConnNum; ++i) {
             clientServers[i]->connect();
-            if (i % 5000 == 0) LOG_WARN << "Initiated " << i << " connections...";
+            LOG_WARN << i;
+            // if (i % 5000 == 0) LOG_WARN << "Initiated " << i << " connections...";
             usleep(1000);
         }
+
+        LOG_WARN << perfMonitor.getSuccessNum();
     });
 
     loop.loop();

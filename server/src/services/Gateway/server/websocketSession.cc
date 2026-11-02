@@ -3,7 +3,6 @@
 #include "chat_generated.h"
 
 #include <openssl/sha.h>
-#include <sstream>
 #include <cstring>
 #include <unordered_map>
 #include <mutex>

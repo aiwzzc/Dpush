@@ -2,6 +2,21 @@
 #include "websocketSession.h"
 #include "iouring.h"
 #include "constants/RedisKey.h"
+#include "types.h"
+#include <atomic>
+
+extern std::atomic<uint64_t> start_latency;
+
+namespace {
+
+    uint64_t getCurrentTimestamp_test_pubsub() {
+        auto now = std::chrono::system_clock::time_point::clock::now();
+        auto duration = now.time_since_epoch();
+        auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration);
+        return milliseconds.count();
+    }
+
+};
 
 using namespace pulse::constants;
 
@@ -88,6 +103,8 @@ config_(config) {
             });
         }
 #elif 1
+        start_latency.store(getCurrentTimestamp_test_pubsub(), std::memory_order_acq_rel);
+
         for(EventLoop* loop : GatewayPubSubManager::all_io_loops_) {
             loop->runInLoop([roomid, shared_ws_frame] () {
                 auto it = LocalWebsockConnRoomhash.find(roomid);

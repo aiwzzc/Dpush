@@ -1,15 +1,14 @@
-cmake_minimum_required(VERSION 3.20)
-project(LogicBenchmark)
+aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} Bench_SRC)
 
-set(CMAKE_CXX_STANDARD 20)
+add_executable(broadcast_bench ${Bench_SRC})
 
-include_directories(/home/zzc/linux_test/DistributedPush/server/GatewayServer)
-link_directories(/home/zzc/linux_test/DistributedPush/server/GatewayServer/build/lib) 
+target_include_directories(broadcast_bench
+PRIVATE
+    ${CMAKE_SOURCE_DIR}/third_party
+    ${CMAKE_BINARY_DIR}/fbs 
+)
 
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-
-add_executable(logicBenchmark MaxConnBenchmark.cc)
-
-target_link_libraries(logicBenchmark muduo_net muduo_base)
+target_link_libraries(broadcast_bench
+PRIVATE
+    muduo_net
+)

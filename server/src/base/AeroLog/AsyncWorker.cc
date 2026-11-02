@@ -82,6 +82,7 @@ AsyncWorker::tl_SpscRingBufferPtr AsyncWorker::RegisterThread() {
 
 void AsyncWorker::backendThreadFunc() {
     char batch_buffer[KBatchBufferSize];
+    char* current = batch_buffer;
     char* out = batch_buffer;
     std::size_t remain = KBatchBufferSize;
     std::size_t round_robin_idx{0};
@@ -152,9 +153,10 @@ void AsyncWorker::backendThreadFunc() {
 
                 if(entry.len > remain) {
                     for(const auto& sink : this->sinks_) {
-                        sink->append(batch_buffer, KBatchBufferSize - remain);
+                        sink->append(batch_buffer, KBatchBufferSize - remain - (current - batch_buffer));
                     }
 
+                    current = batch_buffer;
                     out = batch_buffer;
                     remain = KBatchBufferSize;
                 }
@@ -173,10 +175,13 @@ void AsyncWorker::backendThreadFunc() {
 
         if(processed > 0) {
             std::size_t written = KBatchBufferSize - remain;
+            std::size_t add_len = current - batch_buffer;
             if(written > 0) {
                 for(const auto& sink : this->sinks_) {
-                    sink->append(batch_buffer, written);
+                    sink->append(batch_buffer, written - add_len);
                 }
+
+                current += (written - add_len);
             }
 
             for(const auto& sink : this->sinks_) {

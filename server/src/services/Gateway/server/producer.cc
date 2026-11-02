@@ -1,6 +1,8 @@
 #include "producer.h"
 #include "chat_generated.h"
 #include "constants/protocol_fields.h"
+#include "types.h"
+#include "websocketSession.h"
 
 using namespace pulse::constants;
 

@@ -1,5 +1,6 @@
 #include "AuthServiceImpl.h"
 #include "constants/protocol_fields.h"
+#include "crypto/md5.h"
 #include <jwt.h>
 
 using namespace pulse::constants;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <cstdint>
 #include <liburing.h>
 #include <cstring>
 #include <sys/eventfd.h>
@@ -125,6 +127,20 @@ private:
     std::size_t pool_size_;
 };
 
+extern std::atomic<int> writed_conns;
+extern std::atomic<uint64_t> end_latency;
+
+namespace {
+
+    uint64_t getCurrentTimestamp_test_io_uring() {
+        auto now = std::chrono::system_clock::time_point::clock::now();
+        auto duration = now.time_since_epoch();
+        auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration);
+        return milliseconds.count();
+    }
+
+};
+
 class ThreadLocalUring {
 
 public:
@@ -209,13 +225,13 @@ private:
         io_uring_submit(this->ring_);
 
         if(task->current_size_ < task->targets_.size()) {
-            // this->loop_->queueInLoop([task, this] () {
-            //     sendChunk(task);
-            // });
-
-            this->loop_->runAfter(0.001, [task, this]() {  // 1ms
+            this->loop_->queueInLoop([task, this] () {
                 sendChunk(task);
             });
+
+            // this->loop_->runAfter(0.001, [task, this]() {  // 1ms
+            //     sendChunk(task);
+            // });
         }
     }
 
@@ -245,6 +261,13 @@ private:
         }
 
         io_uring_cq_advance(this->ring_, count);
+        writed_conns.fetch_add(count, std::memory_order_acq_rel);
+        
+        uint64_t current_timestamp = getCurrentTimestamp_test_io_uring();
+        uint64_t latency_timestamp = end_latency.load(std::memory_order_relaxed);
+
+        while(current_timestamp > latency_timestamp && 
+        !end_latency.compare_exchange_weak(latency_timestamp, current_timestamp, std::memory_order_relaxed)) {}
 
         flush_backlog();
     }

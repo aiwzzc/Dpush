@@ -4,15 +4,11 @@
 #include "auth.pb.h"
 
 #include "concurrency/coroutineTask.h"
-#include "crypto/md5.h"
 
-#include "mysql/BlockQueue.h"
 #include "mysql/MySQLConn.h"
 #include "mysql/MySQLConnPool.h"
-#include "mysql/MySQLWorker.h"
 #include "mysql/SQLOperation.h"
 
-#include <memory>
 #include <grpcpp/grpcpp.h>
 #include <sw/redis++/redis++.h>
 #include <uuid/uuid.h>

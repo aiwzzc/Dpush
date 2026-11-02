@@ -5,12 +5,7 @@
 
 namespace pulse::Logger {
 
-#ifdef __cpp_lib_hardware_interference_size
-#include <new>
-    constexpr std::size_t KSCacheLineSize = std::hardware_destructive_interference_size;
-#else
-    constexpr std::size_t KSCacheLineSize = 64;
-#endif
+constexpr std::size_t KSCacheLineSize = 64;
 
 // 实际容量为 Capacity - 1
 template<typename T, std::size_t Capacity>

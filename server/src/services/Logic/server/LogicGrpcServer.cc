@@ -502,7 +502,7 @@ grpc::ServerUnaryReactor* LogicGrpcServer::pullMessage(grpc::CallbackServerConte
     logic::PullMessageResponse* response) {
 
     grpc::ServerUnaryReactor* reactor = context->DefaultReactor();
-
+    
     DoPullMessage(reactor, request, response);
 
     return reactor;
